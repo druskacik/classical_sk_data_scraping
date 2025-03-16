@@ -1,0 +1,22 @@
+[project]
+name = "data-scraping"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.13.3",
+    "curl-cffi>=0.10.0",
+    "lxml>=5.3.1",
+    "pandas>=2.2.3",
+    "python-dotenv>=1.0.1",
+    "schedule>=1.2.2",
+    "tldextract>=5.1.3",
+    "tqdm>=4.67.1",
+]
+
+[tool.setuptools]
+py-modules = []
+
+[tool.uv]
+package = true

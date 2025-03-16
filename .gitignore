@@ -1,0 +1,10 @@
+data/*
+.venv
+
+!data/.gitkeep
+
+__pycache__
+.env
+*.env
+
+*.ipynb
