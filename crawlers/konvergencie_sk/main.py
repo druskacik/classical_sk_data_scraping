@@ -49,6 +49,15 @@ def extract_date(text):
     
     return None
 
+def convert_date(date_str):
+    """
+    Convert date string to format 'yyyy-mm-dd'
+    """
+    if not isinstance(date_str, str):
+        return None
+    sep = '/' if '/' in date_str else '.'
+    return f'{date_str.split(sep)[2]}-{date_str.split(sep)[1]}-{date_str.split(sep)[0]}'
+
 def validate_concert(concert):
     if concert['date'] is None:
         return False
@@ -73,7 +82,7 @@ def extract_concert_info(concert):
     return {
 		'title': title,
 		'url': url,
-		'date': date,
+		'date': convert_date(date),
 		'time_from': time,
 		'time_to': None,
 		'venue': validate_venue(venue),

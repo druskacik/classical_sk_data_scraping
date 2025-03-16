@@ -24,6 +24,16 @@ def validate_concert(concert):
     
     return True
 
+def convert_date(date_str):
+    """
+    Convert date string to format 'yyyy-mm-dd'
+    """
+    if not isinstance(date_str, str):
+        return None
+    
+    date = date_str.split(' ')[0]
+    return f'{date.split('.')[2]}-{date.split('.')[1]}-{date.split('.')[0]}'
+
 def extract_concert_info(concert):
     
     start_time = concert['start']
@@ -38,7 +48,7 @@ def extract_concert_info(concert):
     
     return {
         'title': concert['title'],
-        'date': date_str,
+        'date': convert_date(date_str),
         'url': 'https://www.sfk.sk' + concert['url'],
         'time_from': time_str,
         'time_to': None,
