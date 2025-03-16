@@ -12,7 +12,7 @@ def upload_concerts(data: list[dict]):
     """
     Upload concerts to the API
     """
-    response = requests.post(f'{API_URL}/api/add-concerts', json=data, headers={'API_KEY': API_KEY})
+    response = requests.post(f'{API_URL}/api/add-concerts', json=data, headers={'x-api-key': API_KEY})
     print(response.json())
     return response.json()
 
