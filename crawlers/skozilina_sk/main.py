@@ -8,29 +8,6 @@ import pandas as pd
 
 from ..classical import upload_concerts
 
-import re
-
-def extract_concert_info(concert):
-    
-    start_time = concert['start']
-    # Parse the ISO format datetime
-    datetime_obj = datetime.datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-    
-    # Extract date in format dd.mm.yyyy
-    date_str = datetime_obj.strftime('%d.%m.%Y')
-    
-    # Extract time in format HH:MM
-    time_str = datetime_obj.strftime('%H:%M')
-    
-    return {
-        'title': concert['title'],
-        'date': convert_date(date_str),
-        'url': 'https://www.sfk.sk' + concert['url'],
-        'time_from': time_str,
-        'time_to': None,
-        'venue': concert['location'],
-    }
-
 def main():
     
     current_year = datetime.datetime.now().year
@@ -86,5 +63,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
+    

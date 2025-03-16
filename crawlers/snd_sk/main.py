@@ -35,7 +35,7 @@ def extract_event_info(event):
         'url': url,
         'time_from': convert_time(time_from),
         'time_to': convert_time(time_to),
-        'event_type': event_type,
+        'type': event_type,
     }
 
 
@@ -78,8 +78,8 @@ def main():
             print(f'Getting concerts for {url} ...')
             concert_data.extend(get_concert_data(url))
     
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'time_to', 'event_type'])
-    df = df[df['event_type'].isin(['opera', 'balet'])]
+    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'time_to', 'type'])
+    df = df[df['type'].isin(['opera', 'balet'])]
     df['url'] = df['url'].apply(lambda x: f'https://snd.sk{x}')
     df.insert(0, 'venue', 'Slovenské národné divadlo')
     df.insert(0, 'city', 'Bratislava')
@@ -92,9 +92,6 @@ def main():
     
     # Convert DataFrame to list of dictionaries for API upload
     concert_data = df.to_dict(orient='records')
-    # Rename 'event_type' key to 'type' in each dictionary
-    for concert in concert_data:
-        concert['type'] = concert.pop('event_type')
     print(f'Prepared {len(concert_data)} concerts for upload')
 
     print('Uploading concerts to the API ...')
