@@ -47,6 +47,8 @@ def main():
     df.rename(columns={
         'name': 'title',
     }, inplace=True)
+    
+    df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
 
     df.insert(0, 'source_url', 'https://skozilina.sk')
     df.insert(0, 'source', 'Štátny komorný orchester Žilina')
