@@ -1,4 +1,5 @@
 import json
+import html
 import datetime
 
 import requests
@@ -25,7 +26,7 @@ def main():
         script_tags = soup.find_all('script', type='application/ld+json')
         if len(script_tags) <= 1:
             break
-        data = json.loads(script_tags[1].string)
+        data = json.loads(html.unescape(script_tags[1].string))
         concert_jsons.extend(data)
         
         current_month += 1
