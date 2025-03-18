@@ -6,6 +6,7 @@ Requires-Python: >=3.12
 Description-Content-Type: text/markdown
 Requires-Dist: beautifulsoup4>=4.13.3
 Requires-Dist: curl-cffi>=0.10.0
+Requires-Dist: esprima>=4.0.1
 Requires-Dist: lxml>=5.3.1
 Requires-Dist: pandas>=2.2.3
 Requires-Dist: python-dotenv>=1.0.1
