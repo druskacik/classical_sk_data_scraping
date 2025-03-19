@@ -6,9 +6,6 @@ import pandas as pd
 
 from ..classical import upload_concerts
 
-import re
-
-
 def validate_concert(concert):
     # Check if both start and end dates exist and if the difference is more than 1 day
     if concert.get('start') is not None and concert.get('end') is not None:
