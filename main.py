@@ -12,6 +12,7 @@ from crawlers.kpvh_sk.main import main as kpvh_sk_main
 from crawlers.sdke_sk.main import main as sdke_sk_main
 from crawlers.ticketportal_sk.main import main as ticketportal_sk_main
 from crawlers.simachart_weebly_com.main import main as simachart_weebly_com_main
+from crawlers.toottoot_fm.main import main as toottoot_fm_main
 
 def run_crawler(main_function):
     try:
@@ -33,6 +34,7 @@ if __name__ == "__main__":
     run_crawler(sdke_sk_main)
     run_crawler(ticketportal_sk_main)
     run_crawler(simachart_weebly_com_main)
+    run_crawler(toottoot_fm_main)
     print("Sheduling crawlers...")
     
     schedule.every().day.at("01:00").do(filharmonia_sk_main)
@@ -45,7 +47,8 @@ if __name__ == "__main__":
     schedule.every().day.at("01:07").do(sdke_sk_main)
     schedule.every().day.at("01:08").do(ticketportal_sk_main)
     schedule.every().day.at("01:09").do(simachart_weebly_com_main)
-
+    schedule.every().day.at("01:10").do(toottoot_fm_main)
+    
     while True:
         schedule.run_pending()
         time.sleep(1)
