@@ -1,20 +1,62 @@
-
 import os
-import requests
 from dotenv import load_dotenv
-
+import psycopg2
 load_dotenv()
-
-API_URL = os.getenv('API_URL')
-API_KEY = os.getenv('API_KEY')
 
 def upload_concerts(data: list[dict]):
     """
     Upload concerts to the API
     """
-    response = requests.post(f'{API_URL}/api/add-concerts', json=data, headers={'x-api-key': API_KEY})
-    print(response.json())
-    return response.json()
+    DB_NAME = os.getenv('DB_NAME', 'classical')
+    DB_USER = os.getenv('DB_USER', 'postgres')
+    DB_PASS = os.getenv('DB_PASS', 'postgres')
+    DB_HOST = os.getenv('DB_HOST', 'localhost')
+    DB_PORT = os.getenv('DB_PORT', '5432')
+    
+    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST, port=DB_PORT)
+    cursor = conn.cursor()
+    
+    new_concerts = []
+    skipped_count = 0
+    
+    for concert in data:
+        cursor.execute(
+            "SELECT id FROM classical_concert WHERE title = %s AND date = %s AND url = %s",
+            (concert['title'], concert['date'], concert['url'])
+        )
+        exists = cursor.fetchone()
+        
+        if not exists:
+            new_concerts.append(concert)
+        else:
+            skipped_count += 1
+    
+    inserted_count = 0
+    if new_concerts:
+        for concert in new_concerts:
+            cursor.execute(
+                "INSERT INTO classical_concert (title, date, source, source_url, time_from, time_to, city, venue, url, type) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    concert['title'], 
+                    concert['date'], 
+                    concert['source'],
+                    concert['source_url'],
+                    concert.get('time_from'),
+                    concert.get('time_to'), 
+                    concert['city'], 
+                    concert['venue'],
+                    concert['url'], 
+                    concert.get('type')
+                )
+            )
+            inserted_count += 1
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    return inserted_count, skipped_count
 
 class Concert:
     def __init__(self, title: str, date: str, source: str, time_from: str, time_to: str, city: str, venue: str, url: str, event_type: str):

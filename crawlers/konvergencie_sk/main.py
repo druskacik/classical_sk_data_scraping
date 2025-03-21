@@ -75,7 +75,8 @@ def main():
     print(f'Prepared {len(concert_data)} concerts for upload')
 
     print('Uploading concerts to the API ...')
-    upload_concerts(concert_data)
+    inserted_count, skipped_count = upload_concerts(concert_data)
+    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
 
 if __name__ == '__main__':
     main()

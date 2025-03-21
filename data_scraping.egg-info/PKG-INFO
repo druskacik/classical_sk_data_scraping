@@ -1,4 +1,4 @@
-Metadata-Version: 2.2
+Metadata-Version: 2.4
 Name: data-scraping
 Version: 0.1.0
 Summary: Add your description here
@@ -7,8 +7,10 @@ Description-Content-Type: text/markdown
 Requires-Dist: beautifulsoup4>=4.13.3
 Requires-Dist: curl-cffi>=0.10.0
 Requires-Dist: esprima>=4.0.1
+Requires-Dist: google-genai>=1.7.0
 Requires-Dist: lxml>=5.3.1
 Requires-Dist: pandas>=2.2.3
+Requires-Dist: psycopg2>=2.9.10
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: schedule>=1.2.2
 Requires-Dist: tldextract>=5.1.3

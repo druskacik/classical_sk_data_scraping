@@ -26,7 +26,8 @@ def extract_date(text):
     Returns:
         str or None: The extracted date in format dd.mm.yyyy, or None if no date is found.
     """
-    date_pattern = r'(\d{1,2}\.\d{1,2}\.(?:\d{4}|\d{2}))'
+    # Format with dots and optional spaces: 13. 4. 2025 or 13.4.2025
+    date_pattern = r'(\d{1,2}\s*\.\s*\d{1,2}\s*\.\s*(?:\d{4}|\d{2}))'
     match = re.search(date_pattern, text)
     if match:
         return match.group(1)

@@ -1,8 +1,10 @@
 beautifulsoup4>=4.13.3
 curl-cffi>=0.10.0
 esprima>=4.0.1
+google-genai>=1.7.0
 lxml>=5.3.1
 pandas>=2.2.3
+psycopg2>=2.9.10
 python-dotenv>=1.0.1
 schedule>=1.2.2
 tldextract>=5.1.3
