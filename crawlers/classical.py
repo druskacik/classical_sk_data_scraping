@@ -5,13 +5,13 @@ load_dotenv()
 
 def upload_concerts(data: list[dict]):
     """
-    Upload concerts to the API
+    Upload concerts to the database
     """
-    DB_NAME = os.getenv('DB_NAME', 'classical')
-    DB_USER = os.getenv('DB_USER', 'postgres')
-    DB_PASS = os.getenv('DB_PASS', 'postgres')
-    DB_HOST = os.getenv('DB_HOST', 'localhost')
-    DB_PORT = os.getenv('DB_PORT', '5432')
+    DB_NAME = os.getenv('DB_NAME')
+    DB_USER = os.getenv('DB_USER')
+    DB_PASS = os.getenv('DB_PASS')
+    DB_HOST = os.getenv('DB_HOST')
+    DB_PORT = os.getenv('DB_PORT')
     
     conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST, port=DB_PORT)
     cursor = conn.cursor()
@@ -36,6 +36,61 @@ def upload_concerts(data: list[dict]):
         for concert in new_concerts:
             cursor.execute(
                 "INSERT INTO classical_concert (title, date, source, source_url, time_from, time_to, city, venue, url, type) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    concert['title'], 
+                    concert['date'], 
+                    concert['source'],
+                    concert['source_url'],
+                    concert.get('time_from'),
+                    concert.get('time_to'), 
+                    concert['city'], 
+                    concert['venue'],
+                    concert['url'], 
+                    concert.get('type')
+                )
+            )
+            inserted_count += 1
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    return inserted_count, skipped_count
+
+def upload_potential_concerts(data: list[dict]):
+    """
+    Upload potential concerts to the database
+    """
+    DB_NAME = os.getenv('DB_NAME')
+    DB_USER = os.getenv('DB_USER')
+    DB_PASS = os.getenv('DB_PASS')
+    DB_HOST = os.getenv('DB_HOST')
+    DB_PORT = os.getenv('DB_PORT')
+    
+    conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST, port=DB_PORT)
+    cursor = conn.cursor()
+    
+    new_concerts = []
+    skipped_count = 0
+    
+    for concert in data:
+        cursor.execute(
+            "SELECT id FROM potential_event WHERE title = %s AND date = %s AND url = %s",
+            (concert['title'], concert['date'], concert['url'])
+        )
+        exists = cursor.fetchone()
+        
+        if not exists:
+            new_concerts.append(concert)
+        else:
+            skipped_count += 1
+    
+    inserted_count = 0
+    if new_concerts:
+        for concert in new_concerts:
+            cursor.execute(
+                "INSERT INTO potential_event (title, date, source, source_url, time_from, time_to, city, venue, url, type) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     concert['title'], 

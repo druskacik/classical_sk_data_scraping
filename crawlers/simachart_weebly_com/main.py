@@ -5,11 +5,7 @@ from bs4 import BeautifulSoup
 
 from ..classical import upload_concerts
 from ..extractors import extract_date, extract_time, clean_string
-
-def format_date(date):
-    dd, mm, yy = date.split('.')
-    dd, mm, yy = int(dd), int(mm), int(yy)
-    return f'{yy}-{mm:02d}-{dd:02d}'
+from ..formaters import format_date
 
 def extract_concert_info(paragraph):
     fonts = paragraph.find_all('font', attrs={'size': True})

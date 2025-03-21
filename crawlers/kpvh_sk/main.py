@@ -5,13 +5,7 @@ from bs4 import BeautifulSoup
 
 from ..classical import upload_concerts
 from ..extractors import extract_date, extract_time
-
-def format_date(date_str):
-	day, month, year = date_str.split('.')
-	year = int(year.strip())
-	month = int(month.strip())
-	day = int(day.strip())
-	return f'{year}-{month:02d}-{day:02d}'
+from ..formaters import format_date
 
 def remove_non_breaking_spaces(text):
     return text.replace('\xa0', ' ').strip()
