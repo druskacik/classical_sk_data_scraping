@@ -1,4 +1,5 @@
 import os
+import json
 import psycopg2
 from dotenv import load_dotenv
 
@@ -35,7 +36,7 @@ def is_classical_music_event(client, json_data):
 
 def fetch_potential_events(conn):
     cursor = conn.cursor()
-    cursor.execute("SELECT id, title, url, venue FROM potential_event WHERE analyzed = false")
+    cursor.execute("SELECT id, title, url, venue, description FROM potential_event WHERE analyzed = false")
     return cursor.fetchall()
 
 def update_potential_event(conn, id, is_classical_concert):
@@ -89,9 +90,14 @@ def main():
     conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST, port=DB_PORT)
     potential_events = fetch_potential_events(conn)
     if len(potential_events) > 0:
-        for event in potential_events:
-            output = is_classical_music_event(client, event)
+        cursor = conn.cursor()  
+        cursor.execute("SELECT id, title, url, venue, description FROM potential_event WHERE analyzed = false")
+        column_names = [desc[0] for desc in cursor.description]
+        for event in cursor.fetchall():
+            event_json = json.dumps(dict(zip(column_names, event)), ensure_ascii=False)
+            output = is_classical_music_event(client, event_json)
             output = True if output == 'true' else False
+            print(f"Analyzed event {event_json}: {output}")
             update_potential_event(conn, event[0], output)
     else:
         print("No potential events to analyze.")

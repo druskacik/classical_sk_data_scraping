@@ -1,0 +1,2913 @@
+city,population
+Bratislava,475503
+Košice,229040
+Prešov,84824
+Žilina,82656
+Nitra,77610
+Banská Bystrica,76018
+Trnava,62955
+Trenčín,54740
+Martin,52520
+Martin,51139
+Poprad,49855
+Prievidza,45017
+Zvolen,42476
+Zvolen,39844
+Nové Zámky,37791
+Považská Bystrica,37706
+Michalovce,36704
+Spišská Nová Ves,35431
+Komárno,32287
+Levice,31974
+Humenné,31359
+Liptovský Mikuláš,30808
+Bardejov,30267
+Ružomberok,27407
+Piešťany,26668
+Lučenec,25902
+Topoľčany,25249
+Pezinok,24900
+Trebišov,23213
+Dunajská Streda,23044
+Trebišov,22890
+Čadca,22580
+Vranov nad Topľou,22465
+Rimavská Sobota,22048
+Dubnica nad Váhom,21805
+Partizánske,21439
+Šaľa,21183
+Vranov nad Topľou,20702
+Hlohovec,20556
+Senec,20116
+Senica,19875
+Brezno,19790
+Nové Mesto nad Váhom,19644
+Senica,19430
+Malacky,18804
+Snina,18712
+Dolný Kubín,18095
+Rožňava,17569
+Púchov,17068
+Žiar nad Hronom,16879
+Bánovce nad Bebravou,16614
+Handlová,16199
+Sereď,15737
+Stará Ľubovňa,15707
+Skalica,15573
+Skalica,15471
+Kežmarok,15304
+Galanta,15277
+Kysucké Nové Mesto,14660
+Levoča,14256
+Detva,13955
+Šamorín,13628
+Šamorín,13566
+Stupava,12685
+Sabinov,12349
+Zlaté Moravce,11946
+Bytča,11535
+Revúca,11484
+Holíč,11214
+Svidník,11096
+Myjava,10985
+Veľký Krtíš,10647
+Kolárovo,10572
+Nová Dubnica,10470
+Nová Dubnica,10381
+Moldava nad Bodvou,10305
+Svidník,10168
+Stropkov,10067
+Fiľakovo,9949
+Štúrovo,9777
+Banská Štiavnica,9628
+Šurany,9562
+Modra,9346
+Tvrdošín,8952
+Smižany,8838
+Bernolákovo,8801
+Veľké Kapušany,8799
+Krompachy,8739
+Stará Turá,8724
+Vráble,8593
+Sečovce,8526
+Veľký Meder,8446
+Svit,7743
+Dunajská Lužná,7622
+Krupina,7576
+Vrútky,7511
+Kráľovský Chlmec,7489
+Hurbanovo,7467
+Námestovo,7465
+Šahy,7267
+Jarovnice,7241
+Trstená,7213
+Hriňová,7182
+Liptovský Hrádok,7154
+Šahy,7069
+Nová Baňa,7007
+Ivanka pri Dunaji,6971
+Tornaľa,6971
+Turzovka,6936
+Chorvátsky Grob,6830
+Hnúšťa,6762
+Želiezovce,6756
+Spišská Belá,6646
+Krásno nad Kysucou,6544
+Lipany,6480
+Veľký Šariš,6471
+Turčianske Teplice,6412
+Nemšová,6335
+Beluša,6162
+Medzilaborce,5965
+Gelnica,5951
+Svätý Jur,5941
+Rajec,5897
+Sobrance,5875
+Čaňa,5864
+Žarnovica,5830
+Vrbové,5739
+Oščadnica,5736
+Raková,5630
+Ilava,5568
+Zákamenné,5542
+Sládkovičovo,5415
+Lendak,5409
+Poltár,5333
+Šenkvice,5260
+Skalité,5247
+Gabčíkovo,5232
+Slovenský Grob,5202
+Tvrdošovce,5183
+Rabča,5139
+Rovinka,5136
+Veľká Lomnica,5120
+Dobšiná,5102
+Čierny Balog,5062
+Nesvady,5014
+Dvory nad Žitavou,4999
+Šaštín-Stráže,4979
+Kremnica,4934
+Gbely,4921
+Sliač,4894
+Brezová pod Bradlom,4848
+Rudňany,4789
+Sučany,4711
+Veľké Úľany,4665
+Markušovce,4624
+Pavlovce nad Uhom,4620
+Cífer,4500
+Ľubica,4476
+Valaliky,4475
+Čierne,4419
+Teplička nad Váhom,4379
+Močenok,4356
+Veľké Zálužie,4350
+Cabaj-Čápor,4295
+Strážske,4277
+Palárikovo,4272
+Komjatice,4223
+Trenčianska Teplá,4222
+Nováky,4197
+Turany,4193
+Medzev,4107
+Šoporňa,4081
+Bošany,4063
+Jelka,4042
+Kúty,4036
+Štiavnik,4014
+Terchová,4009
+Giraltovce,4001
+Miloslavov,4000
+Oravská Polhora,3974
+Kanianka,3974
+Leopoldov,3973
+Lednické Rovne,3964
+Borský Mikuláš,3953
+Nižná,3936
+Most pri Bratislave,3913
+Veľká Ida,3911
+Vysoké Tatry,3901
+Varín,3896
+Malinovo,3887
+Trstice,3864
+Bystrany,3824
+Lehota pod Vtáčnikom,3815
+Marcelová,3802
+Kecerovce,3794
+Spišské Podhradie,3791
+Hanušovce nad Topľou,3777
+Veľké Leváre,3751
+Tisovec,3720
+Tešedíkovo,3719
+Liptovské Sliače,3718
+Novoť,3713
+Okoč,3704
+Čachtice,3703
+Turňa nad Bodvou,3700
+Veľké Rovné,3697
+Bánov,3697
+Ľubotice,3638
+Tlmače,3637
+Nálepkovo,3630
+Podbrezová,3622
+Rohožník,3616
+Zlaté Klasy,3611
+Čierna nad Tisou,3586
+Trenčianska Turná,3563
+Jasov,3535
+Zborov,3533
+Zohor,3448
+Oravská Lesná,3445
+Valaská,3442
+Štrba,3415
+Trenčianske Stankovce,3403
+Spišské Vlachy,3387
+Svrčinovec,3370
+Belá nad Cirochou,3369
+Belá,3338
+Rosina,3329
+Bátorove Kosihy,3323
+Horná Súča,3301
+Prakovce,3292
+Zámutov,3290
+Slovenská Ľupča,3265
+Pata,3253
+Smolenice,3248
+Lomnička,3239
+Vlčany,3220
+Neded,3215
+Jelšava,3209
+Horné Saliby,3198
+Rakúsy,3177
+Hruštín,3177
+Richnava,3171
+Hranovnica,3167
+Nesluša,3165
+Nitrianske Pravno,3163
+Gajary,3163
+Nová Dedinka,3150
+Lozorno,3142
+Topoľníky,3116
+Špačince,3110
+Podolínec,3108
+Mútne,3072
+Lužianky,3060
+Dolná Súča,3059
+Huncovce,3055
+Klenovec,3026
+Nová Ľubovňa,3009
+Višňové,3004
+Oravské Veselé,2996
+Likavka,2987
+Veľký Kýr,2980
+Závod,2978
+Veľký Biel,2975
+Lehnice,2965
+Liesek,2962
+Polomka,2942
+Mojmírovce,2922
+Selice,2872
+Ivanka pri Nitre,2868
+Tekovské Lužany,2843
+Jakubany,2841
+Vechec,2837
+Zvolenská Slatina,2802
+Veľké Kostoľany,2798
+Vrakúň,2794
+Krásnohorské Podhradie,2793
+Raslavice,2792
+Pečovská Nová Ves,2788
+Trnovec nad Váhom,2784
+Liptovská Lúžna,2782
+Chminianske Jakubovany,2775
+Družstevná pri Hornáde,2764
+Staškov,2764
+Kokava nad Rimavicou,2761
+Šarišské Michaľany,2759
+Pribeta,2745
+Bystré,2745
+Stará Bystrica,2740
+Svätý Peter,2735
+Košeca,2734
+Hliník nad Hronom,2725
+Chynorany,2725
+Tomášov,2715
+Horné Srnie,2707
+Podhorany,2705
+Topoľčianky,2704
+Sečovská Polianka,2701
+Spišský Štiavnik,2698
+Viničné,2687
+Čaklov,2687
+Poproč,2681
+Nová Bystrica,2680
+Zeleneč,2632
+Soľ,2629
+Brestovany,2622
+Čaklov,2620
+Veľká Mača,2614
+Strečno,2613
+Žehra,2602
+Drahovce,2592
+Rozhanovce,2591
+Hrabušice,2583
+Vysoká nad Kysucou,2578
+Spišský Štvrtok,2578
+Chtelnica,2572
+Hamuliakovo,2568
+Kopčany,2555
+Soľ,2554
+Zázrivá,2552
+Moravské Lieskové,2539
+Očová,2534
+Solčany,2515
+Ladce,2514
+Plavecký Štvrtok,2513
+Budmerice,2506
+Dolné Vestenice,2495
+Spišské Bystré,2479
+Sačurov,2478
+Klin,2475
+Hviezdoslavov,2472
+Heľpa,2471
+Batizovce,2457
+Divina,2441
+Moravany nad Váhom,2440
+Široké,2436
+Dolná Krupá,2435
+Zlatná na Ostrove,2428
+Svodín,2412
+Soblahov,2408
+Papradno,2407
+Liptovská Teplička,2405
+Stakčín,2393
+Lokca,2389
+Bučany,2386
+Svinia,2384
+Zavar,2383
+Važec,2382
+Lehota,2382
+Diakovce,2381
+Kysucký Lieskovec,2378
+Biely Kostol,2376
+Oslany,2372
+Boleráz,2370
+Drienovec,2366
+Častá,2363
+Zubrohlava,2354
+Jaslovské Bohunice,2337
+Jesenské,2335
+Ostrovany,2320
+Zemianska Olča,2317
+Pruské,2310
+Nový Život,2306
+Brodské,2303
+Stráne pod Tatrami,2289
+Klokočov,2287
+Limbach,2287
+Marianka,2284
+Krížová Ves,2281
+Streda nad Bodrogom,2277
+Šúrovce,2277
+Kamenica nad Cirochou,2275
+Madunice,2274
+Letanovce,2265
+Matúškovo,2262
+Pliešovce,2260
+Jablonica,2258
+Spišská Teplica,2253
+Udiča,2247
+Drienov,2238
+Hrnčiarovce nad Parnou,2237
+Kráľová pri Senci,2233
+Drietoma,2233
+Zálesie,2228
+Kalinovo,2226
+Plešivec,2225
+Vysoká pri Morave,2224
+Zbehy,2222
+Východná,2222
+Trhová Hradská,2211
+Suchá nad Parnou,2202
+Spišská Stará Ves,2202
+Výčapy-Opatovce,2197
+Nitrianske Hrnčiarovce,2196
+Kapušany,2187
+Zborov nad Bystricou,2187
+Sihelné,2182
+Závadka nad Hronom,2174
+Seňa,2170
+Branč,2168
+Fintice,2167
+Majcichov,2163
+Banka,2158
+Brusno,2153
+Kotešová,2151
+Moravský Svätý Ján,2150
+Rimavská Seč,2148
+Holice,2144
+Pohorelá,2141
+Vojčice,2139
+Zemné,2136
+Selce,2125
+Gbelce,2123
+Horná Potôň,2114
+Čečejovce,2113
+Švedlár,2112
+Spišské Tomášovce,2110
+Hôrka,2108
+Nedožery-Brezany,2105
+Veľké Ripňany,2104
+Váhovce,2097
+Rišňovce,2096
+Trhovište,2090
+Kozárovce,2082
+Hodruša-Hámre,2076
+Jelenec,2075
+Kalná nad Hronom,2073
+Lysá pod Makytou,2065
+Jarok,2065
+Lisková,2061
+Vinodol,2061
+Cinobaňa,2055
+Kendice,2055
+Bzince pod Javorinou,2051
+Turie,2050
+Láb,2048
+Pružina,2037
+Divín,2030
+Badín,2028
+Dvorníky,2026
+Rabčice,2024
+Dolné Saliby,2020
+Víťaz,2017
+Maňa,2004
+Lemešany,1995
+Valaská Belá,1994
+Veľké Uherce,1990
+Toporec,1988
+Prašice,1986
+Bobrovec,1984
+Imeľ,1982
+Korňa,1981
+Petrovany,1976
+Bojná,1967
+Parchovany,1966
+Vinné,1965
+Sady nad Torysou,1964
+Šuňava,1957
+Gemerská Poloma,1945
+Dlhé Pole,1938
+Lovinobaňa,1935
+Horné Orešany,1934
+Kameničná,1934
+Olešná,1929
+Ďurkov,1926
+Strekov,1926
+Nitrianske Rudno,1925
+Ochodnica,1922
+Oravská Jasenica,1922
+Stráňavy,1916
+Podolie,1914
+Zuberec,1913
+Bobrov,1913
+Mužla,1912
+Dolný Štál,1908
+Banské,1906
+Dlhé nad Cirochou,1893
+Golianovo,1892
+Leles,1889
+Veľký Lapáš,1887
+Hlinné,1887
+Omšenie,1885
+Slovenská Ves,1879
+Lietavská Lúčka,1878
+Margecany,1876
+Horná Kráľová,1866
+Radošina,1862
+Dobrá Niva,1862
+Žitavany,1861
+Dohňany,1859
+Vikartovce,1856
+Kamenná Poruba,1856
+Záhorská Ves,1854
+Jaklovce,1843
+Harichovce,1842
+Báhoň,1833
+Kráľová nad Váhom,1828
+Blatné,1828
+Kolárovice,1824
+Pusté Úľany,1824
+Geča,1822
+Mníšek nad Hnilcom,1816
+Rudina,1814
+Nacina Ves,1808
+Veľké Lovce,1803
+Kamenica,1802
+Slavošovce,1797
+Zemplínska Teplica,1796
+Slovinky,1794
+Žihárec,1794
+Vinica,1794
+Košúty,1793
+Župčany,1793
+Dechtice,1790
+Diviacka Nová Ves,1790
+Plaveč,1786
+Bystričany,1785
+Vydrany,1783
+Jacovce,1782
+Iža,1781
+Radošovce,1778
+Pukanec,1777
+Kuchyňa,1769
+Kostolište,1768
+Diviaky nad Nitricou,1761
+Tesárske Mlyňany,1761
+Valča,1760
+Kláštor pod Znievom,1757
+Sekule,1755
+Šintava,1754
+Čereňany,1754
+Kriváň,1752
+Malý Šariš,1746
+Križovany nad Dudváhom,1745
+Kvetoslavov,1744
+Michaľany,1744
+Kamenec pod Vtáčnikom,1744
+Spišský Hrhov,1743
+Krušovce,1741
+Žabokreky nad Nitrou,1738
+Tomášikovo,1736
+Jakubov,1736
+Lazany,1735
+Zemianske Kostoľany,1733
+Nemecká,1730
+Ludanice,1723
+Sebedražie,1715
+Štvrtok na Ostrove,1714
+Sľažany,1712
+Makov,1710
+Zákopčie,1710
+Orechová Potôň,1705
+Kuzmice,1704
+Lietavská Svinná-Babkov,1702
+Malá Ida,1701
+Pohronská Polhora,1700
+Alekšince,1699
+Chocholná-Velčice,1695
+Vidiná,1694
+Brezovica,1690
+Studienka,1685
+Červeník,1685
+Horný Vadičov,1679
+Sološnica,1671
+Beladice,1666
+Halič,1662
+Ružindol,1659
+Hermanovce,1658
+Nová Lesná,1657
+Vinohrady nad Váhom,1657
+Reca,1656
+Jahodná,1654
+Dolná Streda,1654
+Dolný Hričov,1651
+Lúčky,1651
+Melčice-Lieskové,1651
+Konská,1650
+Dulovce,1648
+Jánovce,1647
+Čierny Brod,1645
+Nižný Hrabovec,1640
+Častkovce,1639
+Plevník-Drienové,1639
+Štefanov,1638
+Plavnica,1637
+Borský Svätý Jur,1631
+Kočovce,1631
+Bidovce,1629
+Breza,1627
+Veľký Cetín,1626
+Ražňany,1625
+Ožďany,1624
+Andovce,1623
+Žaškov,1622
+Modrý Kameň,1620
+Vavrečka,1620
+Horná Štubňa,1618
+Liptovská Osada,1617
+Petrovice,1614
+Krasňany,1614
+Svederník,1614
+Klátova Nová Ves,1611
+Voderady,1609
+Šarovce,1606
+Malcov,1604
+Chlebnice,1604
+Radzovce,1602
+Domaniža,1601
+Lietava,1601
+Svinná,1591
+Veľké Blahovo,1589
+Švábovce,1589
+Hraň,1586
+Trakovice,1581
+Drahňov,1578
+Mostová,1578
+Dubník,1576
+Komjatná,1576
+Lovčica-Trubín,1574
+Ruskov,1572
+Bešeňov,1569
+Nižná Myšľa,1568
+Ihľany,1564
+Malženice,1560
+Torysa,1559
+Kajal,1554
+Kováčová,1552
+Opatovce nad Nitrou,1552
+Kolíňany,1551
+Kamenná Poruba,1548
+Vígľaš,1546
+Liptovské Revúce,1536
+Bolešov,1535
+Hodejov,1534
+Vrbov,1534
+Úľany nad Žitavou,1533
+Perín-Chym,1532
+Uhrovec,1529
+Poniky,1529
+Kluknava,1528
+Kovarce,1527
+Preseľany,1524
+Lipová,1524
+Radoľa,1521
+Rybany,1517
+Prečín,1510
+Obyce,1510
+Malé Leváre,1510
+Nižný Hrušov,1508
+Dolný Ohaj,1505
+Varhaňovce,1504
+Plášťovce,1504
+Telgárt,1499
+Budkovce,1498
+Veľké Trakany,1495
+Starý Tekov,1495
+Haniska,1494
+Šarišské Jastrabie,1492
+Bystrička,1492
+Slanec,1489
+Tovarníky,1488
+Hronovce,1486
+Malčice,1482
+Hybe,1480
+Kamenín,1479
+Štítnik,1478
+Veľký Slavkov,1477
+Sedliská,1477
+Bystrička,1476
+Vinosady,1473
+Trstené pri Hornáde,1471
+Kysak,1469
+Kalinkovo,1467
+Krakovany,1467
+Kútniky,1466
+Bohdanovce nad Trnavou,1465
+Veľké Ludince,1464
+Horné Obdokovce,1459
+Nová Dedina,1456
+Dolná Tižina,1456
+Suchá Hora,1455
+Hrochoť,1452
+Vrbovce,1450
+Gbeľany,1449
+Dubovica,1447
+Nižný Žipov,1445
+Lubina,1444
+Babín,1444
+Okoličná na Ostrove,1440
+Beckov,1436
+Krajné,1434
+Dlhá nad Oravou,1433
+Veličná,1431
+Hniezdne,1428
+Klasov,1426
+Lutila,1425
+Veľký Grob,1425
+Hontianske Nemce,1424
+Sobotište,1424
+Čierna Voda,1424
+Sedliská,1422
+Dulova Ves,1422
+Bojničky,1421
+Kostolné Kračany,1419
+Helcmanovce,1414
+Dolná Mariková,1412
+Bíňa,1411
+Lieskovec,1409
+Rybník,1406
+Trstín,1405
+Bušince,1404
+Gánovce,1404
+Vyšné Ružbachy,1404
+Urmince,1402
+Hronské Kľačany,1401
+Sielnica,1398
+Málinec,1396
+Vištuk,1392
+Chrenovec-Brusno,1391
+Kamenná Poruba,1390
+Somotor,1389
+Jablonové,1385
+Horná Streda,1384
+Ždaňa,1383
+Medzibrod,1382
+Krnča,1376
+Poruba,1376
+Chotín,1375
+Ždiar,1374
+Veľké Dvorníky,1374
+Tomášovce,1374
+Habovka,1374
+Rimavské Janovce,1373
+Dlhé Klčovo,1372
+Jurské,1372
+Sokolovce,1368
+Svätoplukovo,1368
+Brezovica,1367
+Mokrance,1367
+Predmier,1364
+Sokoľany,1361
+Bošáca,1360
+Žirany,1360
+Istebné,1359
+Ohrady,1359
+Dolné Orešany,1359
+Predmier,1357
+Mošovce,1357
+Mirkovce,1356
+Sverepec,1356
+Oravský Podzámok,1353
+Biel,1352
+Farná,1349
+Košické Oľšany,1348
+Podvysoká,1347
+Hájske,1346
+Mojzesovo,1346
+Budča,1340
+Trebatice,1340
+Nová Ves nad Žitavou,1338
+Vlčkovce,1338
+Skačany,1337
+Brzotín,1336
+Košťany nad Turcom,1336
+Kamienka,1336
+Vyšná Šebastová,1335
+Opoj,1335
+Šumiac,1335
+Pozdišovce,1334
+Semerovo,1332
+Brekov,1332
+Tulčík,1331
+Čirč,1330
+Šíd,1329
+Pribylina,1327
+Hrubá Borša,1323
+Vitanová,1321
+Ľubotín,1319
+Veľký Ďur,1319
+Partizánska Ľupča,1318
+Nenince,1318
+Výborná,1316
+Terňa,1315
+Modrany,1315
+Sirk,1314
+Hencovce,1311
+Mojš,1311
+Rožkovany,1306
+Pravenec,1305
+Ruská Nová Ves,1305
+Podbiel,1304
+Liptovský Peter,1303
+Predajná,1301
+Liptovská Štiavnica,1300
+Nové Sady,1296
+Vlkanová,1293
+Michalová,1291
+Čičava,1288
+Gemerská Hôrka,1288
+Vydrník,1288
+Budimír,1288
+Spišský Hrušov,1286
+Žehňa,1277
+Cigeľ,1271
+Zemplínske Hámre,1270
+Čáry,1269
+Dojč,1269
+Kamenica nad Hronom,1269
+Kolačkov,1266
+Chminianska Nová Ves,1259
+Kolta,1257
+Lubeník,1257
+Čechynce,1255
+Trenčianske Jastrabie,1252
+Kokšov-Bakša,1251
+Nitrianska Blatnica,1250
+Lastovce,1250
+Sokoľ,1250
+Liptovská Porúbka,1248
+Lastomír,1248
+Závažná Poruba,1248
+Kostoľany nad Hornádom,1247
+Horný Bar,1244
+Vtáčkovce,1243
+Pohronský Ruskov,1241
+Kračúnovce,1239
+Trnavá Hora,1238
+Považany,1236
+Muráň,1236
+Belá-Dulice,1235
+Ráztočno,1235
+Rajecká Lesná,1234
+Ľubietová,1233
+Číčov,1231
+Udavské,1231
+Žemberovce,1229
+Dúbrava,1228
+Veselé,1224
+Bajč,1223
+Svätý Anton,1222
+Mníchova Lehota,1221
+Šarišské Dravce,1217
+Ľubeľa,1216
+Brvnište,1214
+Tureň,1214
+Tekovská Breznica,1213
+Hul,1212
+Buzica,1212
+Lazy pod Makytou,1209
+Hostie,1209
+Tužina,1208
+Malý Lapáš,1206
+Žabokreky,1206
+Želovce,1206
+"Unín, Skalica District",1206
+Krivany,1205
+Čataj,1205
+Dolné Kočkovce,1205
+Ostrov,1204
+Liešťany,1204
+Nižná Slaná,1204
+Sokolce,1203
+Hvozdnica,1199
+Nána,1198
+Báb,1195
+Vrbnica,1194
+Boťany,1193
+Jasenica,1191
+Nitrianske Sučany,1188
+Zalužice,1186
+Bátovce,1184
+Nitrica,1182
+Malé Dvorníky,1182
+Jamník,1179
+Jasenov,1179
+Kojatice,1177
+Sebechleby,1175
+Čiližská Radvaň,1175
+Cejkov,1171
+Banská Belá,1171
+Lenartov,1170
+Čierne Kľačany,1168
+Lukáčovce,1167
+Skalka nad Váhom,1166
+Mýtna,1165
+Čakajovce,1163
+Zamarovce,1163
+Pobedim,1158
+Teplička,1157
+Beňuš,1152
+Jasová,1151
+Vyhne,1149
+Stankovany,1149
+Kráľovce,1149
+Borša,1146
+Hronec,1146
+Nemce,1142
+Vyšný Žipov,1142
+Dubová,1142
+Obid,1141
+Dolné Obdokovce,1140
+Hajnáčka,1139
+Povina,1138
+Jasenie,1138
+Biskupice,1137
+Kechnec,1137
+Baka,1136
+Fričovce,1136
+Dunajov,1136
+Veľký Blh,1133
+Kátlovce,1133
+Moča,1132
+Stará Kremnička,1131
+Lakšárska Nová Ves,1130
+Bzovík,1129
+Búč,1128
+Zemplínske Hradište,1128
+Kľačany,1127
+Bohdanovce,1127
+Čakanovce,1126
+Malý Slavkov,1126
+Malé Trakany,1124
+Hronský Beňadik,1122
+Vozokany,1121
+Abrahám,1120
+Malachov,1117
+Čalovec,1114
+Pohranice,1112
+Skároš,1108
+Rohovce,1108
+Cerová,1105
+Príbovce,1102
+Záhradné,1101
+Machulince,1101
+Demjata,1101
+Slovenské Nové Mesto,1100
+Liptovský Ján,1099
+Ďurčiná,1096
+Kurima,1095
+Podtureň,1094
+Kráľovičove Kračany,1093
+Čenkovce,1092
+Malý Horeš,1091
+Šajdíkove Humence,1089
+Krpeľany,1087
+Snežnica,1085
+Podhorany,1085
+Čata,1085
+Horná Poruba,1084
+Petrova Ves,1082
+Kľušov,1081
+Záborské,1080
+Borovce,1080
+Oravská Poruba,1079
+Hubová,1079
+Ratnovce,1079
+Hažlín,1078
+Čeľadice,1078
+Podhájska,1077
+Ľubochňa,1074
+Stožok,1074
+Lok,1073
+Horná Ves,1072
+Nededza,1070
+Kľačno,1069
+Veľká Lehota,1069
+Hrušovany,1067
+Chmeľov,1066
+Doľany,1066
+Dubovany,1066
+Petrovce nad Laborcom,1065
+Rokycany,1064
+Tekovské Nemce,1061
+Veľké Orvište,1060
+Kamenný Most,1060
+Kráľov Brod,1058
+Markovce,1058
+Gerlachov,1056
+Hrčeľ,1052
+Mikušovce,1050
+Hostice,1050
+Kunerad,1050
+Černík,1048
+Hladovka,1047
+Košecké Podhradie,1047
+Streženice,1046
+Ladomirová,1045
+Čebovce,1044
+Koš,1041
+Olcnava,1040
+Hrubý Šúr,1038
+Červenica,1033
+Malý Slivník,1032
+Trávnica,1032
+Ivanovce,1032
+Liptovská Teplá,1031
+Moravany,1031
+Michal na Ostrove,1031
+Brehy,1030
+Košická Polianka,1030
+Štitáre,1028
+Nová Bošáca,1027
+Kálnica,1024
+Turčianske Kľačany,1024
+Úbrež,1022
+Divinka,1022
+Maršová-Rašov,1022
+Veľký Horeš,1022
+Žbince,1022
+Blatnica,1021
+Hrhov,1020
+Hertník,1019
+Dražkovce,1019
+Dežerice,1019
+Novosad,1017
+Rudinská,1015
+Rakovec nad Ondavou,1015
+Volkovce,1013
+Dolná Strehová,1013
+Priechod,1009
+Selec,1007
+Iliašovce,1006
+Poráč,1006
+Odorín,1005
+Jablonec,1004
+Dolná Breznica,1004
+Hradište,1003
+Chmiňany,1003
+Gemerská Ves,1001
+Ludrová,1000
+Necpaly,998
+Kružlov,997
+Dolný Lopašov,996
+Richvald,996
+Dolné Srnie,992
+Tovarné,992
+Radnovce,990
+Svinica,989
+Osikov,989
+Jelšovce,988
+Jablonov,987
+Košická Belá,986
+Smolník,986
+Prievaly,985
+Modra nad Cirochou,984
+Veľká Paka,984
+Jur nad Hronom,983
+Zemplínska Široká,982
+Blatná na Ostrove,981
+Hlboké,980
+Boliarov,980
+Chmeľnica,980
+Mýtne Ludany,980
+Brestovec,979
+Sedlice,979
+Salka,979
+Medzany,978
+Práznovce,977
+Súľov-Hradná,977
+Pastuchov,976
+Hlboké nad Váhom,975
+Krušetnica,973
+Malinová,972
+Visolaje,971
+Dubodiel,971
+Stará Lesná,971
+Lodno,971
+Bežovce,970
+Trenčianske Bohuslavice,968
+Bijacovce,967
+Demandice,966
+Hrnčiarska Ves,965
+Povoda,964
+Popudinské Močidľany,963
+Širkovce,957
+Čajkov,957
+Vyšná Myšľa,957
+Lúčnica nad Žitavou,957
+Komoča,955
+Rankovce,954
+Turčianska Štiavnička,954
+Dúbravy,953
+Ploské,952
+Pribeník,952
+Marhaň,952
+Rastislavice,951
+Podhorie,949
+Šarišské Bohdanovce,949
+Korytárky,948
+Skýcov,948
+Ličartovce,948
+Jakubovany (Distric Sabinov),947
+Veľké Kosihy,945
+Kaplna,944
+Lomná,943
+Nemčice,943
+Petrová,943
+Poša,941
+Vajkovce,941
+Lučivná,941
+"Lednica, Púchov District",940
+Janova Lehota,939
+Hucín,939
+Beňadovo,938
+Kapušianske Kľačany,937
+Párnica,936
+Podlužany,934
+Liptovská Kokava,934
+Poloma,933
+Kráľ,932
+Červenica pri Sabinove,932
+Veľká nad Ipľom,932
+Sklabiná,931
+Bracovce,931
+Rapovce,930
+Chrabrany,927
+Rúbaň,926
+Holumnica,925
+Lúky,924
+Krišovská Liesková,924
+Betliar,923
+Zemplínska Nová Ves,920
+Vojany,920
+Jarabina,919
+Dulov,918
+Muránska Dlhá Lúka,918
+Šelpice,917
+Zvončín,917
+Borinka,915
+Janíky,915
+Kokošovce,914
+Podkonice,914
+Veľký Lipník,914
+Dlhá nad Váhom,913
+Padáň,912
+Dolný Pial,911
+Jablonové,910
+Fiľakovské Kováče,909
+Papín,908
+Domaňovce,907
+Horné Mýto,905
+Chrasť nad Hornádom,904
+Smolinské,903
+Čičarovce,902
+"Pucov, Dolný Kubín District",900
+Zábiedovo,900
+Gemer,899
+Lipovec,899
+Gregorovce,898
+Bacúch,897
+Kravany,897
+Nový Tekov,897
+Pernek,895
+Slovenské Pravno,891
+Hontianske Tesáre,889
+Stránske,889
+Svätý Kríž,887
+Jedľové Kostoľany,887
+Sása,887
+Kolačno,885
+Veľký Folkmár,884
+Hôrky,882
+Zbyňov,881
+Utekáč,878
+Nižný Klátov,878
+Brodzany,878
+Veľký Klíž,877
+Župkov,876
+Žakovce,873
+Horovce,872
+Adamovské Kochanovce,872
+Lysica,871
+Lekárovce,870
+Gáň,870
+Zemianske Sady,870
+Horné Otrokovce,869
+Štiavnička,869
+Nižný Slavkov,868
+Trebeľovce,867
+Palín,865
+Veľké Teriakovce,865
+Horné Lefantovce,861
+Podhorany,857
+Švošov,856
+Kobyly,856
+Vlková,855
+Vrádište,852
+Bukovec,851
+Velčice,851
+Teriakovce,850
+Bátka,849
+Dolná Ždaňa,848
+Harmanec,848
+Breznica,848
+Šemša,846
+Sasinkovo,842
+Kameňany,842
+Vasiľov,840
+Horovce,840
+Kazimír,839
+Jovsa,838
+Gerlachov,835
+Horný Hričov,835
+Ružiná,835
+Malatiná,834
+Lackovce,834
+Lada,832
+Hrnčiarske Zalužany,832
+Oponice,832
+Riečka,832
+Cestice,831
+Ložín,829
+Ipeľský Sokolec,829
+Zubák,829
+Veľká Lúka,828
+Kmeťovo,827
+Slavnica,825
+Ulič,825
+Iňačovce,825
+Košolná,824
+Hrušov,824
+Veľaty,823
+Rumanová,821
+Dolný Lieskov,820
+Dolný Bar,819
+Radôstka,819
+Žalobín,819
+Ľubiša,818
+Kaloša,818
+Rudník,817
+Uzovská Panica,816
+Malá Lehota,814
+Slepčany,813
+Štiavnické Bane,813
+Arnutovce,812
+Prašník,812
+Dvorany nad Nitrou,810
+Matiašovce,809
+Dravce,809
+Pataš,808
+Krivá,808
+Bitarová,808
+Tuchyňa,806
+Drienovská Nová Ves,805
+Ondavské Matiašovce,805
+Dobrá Voda,803
+Dolné Lovčice,800
+Hrachovo,799
+Topoľnica,799
+Pavlovce,797
+Vyšný Kubín,796
+Licince,795
+Topoľovka,795
+Malé Uherce,793
+Ladomerská Vieska,792
+Ubľa,792
+Krškany,791
+Dolná Poruba,791
+Včelince,789
+Kuklov,789
+Trenčianske Mitice,787
+Vysoká nad Uhom,786
+Koplotovce,785
+Beniakovce,785
+Vlachovo,785
+Radatice,784
+Neporadza,783
+Valaská Dubová,782
+Motešice,782
+Balog nad Ipľom,781
+Davidov,781
+Spišské Hanušovce,781
+Kostolná pri Dunaji,781
+Hontianske Moravce,781
+Blhovce,780
+Svätuše,779
+Doľany,779
+Ostratice,776
+Ťapešovo,776
+Beloveža,775
+Skrabské,775
+Čab,775
+Plavé Vozokany,774
+Hôrka nad Váhom,774
+Bohunice,773
+Mokroluh,771
+Veľká Hradná,771
+Strelníky,770
+Zbudské Dlhé,769
+Dunajský Klátov,767
+Hozelec,766
+Zlaté,764
+Zemianske Podhradie,764
+Podlužany,764
+Mučín,763
+Stará Myjava,762
+Babindol,762
+Lutiše,761
+Sliepkovce,760
+Drienica,759
+Pôtor,759
+Ladice,758
+Kuzmice,757
+Radava,757
+Staré,755
+Litava,754
+Prietrž,753
+Čierne nad Topľou,752
+Jablonov nad Turňou,752
+Veľké Ozorovce,752
+Zatín,751
+Jovice,751
+Slivník,751
+Hosťovce,750
+Čerhov,749
+Nováčany,749
+Plechotice,749
+Veľké Dvorany,748
+Bzenov,748
+Laškovce,745
+Bobot,745
+Betlanovce,744
+Čaka,743
+Panické Dravce,743
+Veľké Turovce,742
+Hronské Kosihy,742
+Nitrianska Streda,741
+Oravský Biely Potok,740
+Plavecký Mikuláš,740
+Rejdová,740
+Haniska,739
+Veľký Kamenec,738
+Bartošovce,738
+Štós,737
+Kochanovce,737
+Hrádok,737
+"Kyjov, Stará Ľubovňa District",737
+Senné,737
+Tôň,737
+Rudnianska Lehota,736
+Dolné Dubové,736
+Boľ,734
+Hatalov,731
+Fričkovce,731
+Tesáre,730
+Kunova Teplica,730
+Mokrý Háj,729
+Tvarožná,729
+Senohrad,728
+Slovenská Kajňa,727
+Ďačov,727
+Breznička,725
+Kalša,724
+Baloň,720
+Kuková,720
+Čierne nad Topľou,719
+Gemerský Jablonec,719
+Veľké Kozmálovce,718
+Kravany nad Dunajom,718
+Nimnica,716
+Vaďovce,713
+Baška,713
+Jatov,713
+Borčice,712
+Radvaň nad Dunajom,711
+Bačkov,711
+Lúč na Ostrove,711
+Drnava,710
+Chanava,709
+Ovčiarsko,709
+Veľké Bierovce,708
+Maťovské Vojkovce,705
+Slavkovce,705
+Kružlová,705
+Rudná,704
+Záriečie,703
+Dolné Lefantovce,702
+Lúka,701
+Krásnohorská Dlhá Lúka,700
+Lovce,699
+Žakarovce,699
+Malá Čausa,699
+Stretava,699
+Plavecké Podhradie,698
+Veľké Dravce,698
+Hrabkov,698
+Dubové,698
+Bánovce nad Ondavou,697
+Štefanov nad Oravou,697
+Kojšov,697
+Koválov,696
+Smrečany,696
+Martovce,694
+Koválov,693
+Králiky,693
+Neverice,692
+Horné Zelenice,692
+Oborín,692
+Suchohrad,691
+Kostolná-Záriečie,691
+Chľaba,690
+Abranovce,690
+Hermanovce nad Topľou,688
+Čakanovce,688
+Rudlov,687
+Číž,686
+Sklené,686
+Mengusovce,685
+Stupné,684
+Trávnik,683
+Veľká Dolina,683
+Podhradie,682
+Poriadie,682
+Dolná Lehota,681
+Potvorice,681
+Zlatníky,681
+Ivachnová,680
+Braväcovo,680
+Veľké Držkovce,680
+Mlynčeky,679
+Prestavlky,679
+Nový Ruskov,679
+Smilno,678
+Hažín nad Cirochou,677
+Dedinka,677
+Kurov,676
+Olšovany,676
+Horné Štitáre,676
+Hrachovište,676
+Horná Ves,675
+Čimhová,675
+Snakov,675
+Lúčka (Distric Sabinov),675
+Dúbravka,674
+Siladice,673
+Stráža,673
+Suchohrad,673
+Michal nad Žitavou,672
+Hradište pod Vrátnom,672
+Vavrišovo,671
+Lučatín,671
+Holiša,670
+Červený Kameň,670
+Gyňov,669
+Lovča,669
+Záhorce,669
+Tajov,668
+Tušice,668
+Ďurďošík,667
+Žlkovce,663
+Lontov,662
+Falkušovce,662
+Koniarovce,662
+Ovčie,661
+Detvianska Huta,661
+Santovka,659
+Horné Hámre,658
+Bešeňová,657
+Bardoňovo,657
+Brezany,657
+Nová Vieska,656
+Záhor,656
+Krásna Lúka,655
+Vyškovce nad Ipľom,655
+Hronsek,654
+Poľný Kesov,654
+Nemčiňany,654
+Bíňovce,654
+Kvašov,653
+Brezina,653
+Milpoš,653
+Fačkov,653
+Lukov,652
+Koprivnica,652
+Čakany,651
+Blažice,651
+Haligovce,650
+Dvorianky,650
+Sútor,649
+Blatné Remety,649
+Sklabiňa,645
+Zemplínske Jastrabie,643
+Buková,642
+Hrabské,642
+Vyšná Olšava,641
+Horné Semerovce,641
+Horná Mičiná,641
+Šarišská Poruba,641
+Krásnovce,640
+Malá Domaša,639
+Ptičie,638
+Uzovský Šalgov,638
+Stará Halič,638
+Opatovská Nová Ves,637
+Prenčov,637
+Hatné,636
+Boľkovce,636
+Beša,635
+Vítkovce,634
+Roštár,634
+Litmanová,633
+Granč-Petrovce,633
+Voznica,633
+Šiba,633
+Chrastné,632
+Pitelová,631
+Ohradzany,631
+Ňárad,631
+Klčov,630
+Horné Vestenice,629
+Chotča,629
+Abovce,627
+Bačka,627
+Liptovský Ondrej,627
+Mlynica,627
+Sikenica,627
+Hubice,626
+Nižné Ružbachy,626
+Kátov,624
+Nižná Kamenica,624
+Ratková,622
+Podbranč,621
+Šamudovce,620
+Rakovice,620
+Košarovce,620
+Turček,619
+Vlachy,619
+Belina,617
+Sveržov,617
+"Prusy, Bánovce nad Bebravou District",617
+Bôrka,616
+Janík,614
+Merník,614
+Dubovce,614
+Nižná Hutka,614
+Jasenové,614
+Bzenica,614
+Nedanovce,612
+Dlhá nad Kysucou,612
+Mníšek nad Popradom,611
+Hontianska Vrbica,611
+Dolné Trhovište,610
+Ruská,609
+Osuské,609
+Plavecký Peter,608
+Čierna Lehota,608
+Rudník,608
+Bruty,608
+Dargov,607
+Poruba pod Vihorlatom,606
+Pusté Sady,605
+Liptovská Sielnica,605
+Kamanová,605
+Dolné Plachtince,603
+Lúčky,603
+Stredné Plachtince,602
+Orlov,601
+Trebostovo,600
+Veľké Kršteňany,600
+Rakovnica,598
+Kráľova Lehota,598
+Horná Lehota,598
+Kostolné,598
+Závadka,598
+Dlhé Stráže,597
+Vyšný Mirošov,597
+Rožňavské Bystré,597
+Čifáre,596
+Dobroč,596
+Barca,596
+Brestov,595
+Nadlice,594
+Brunovce,593
+Dolné Zelenice,592
+Gemerská Panica,591
+Držkovce,591
+Igram,590
+Horné Trhovište,590
+Kolinovce,590
+Paňovce,589
+Šurianky,588
+Šávoľ,588
+Chlmec,588
+Lošonec,588
+Veľké Slemence,588
+Dolné Naštice,588
+Kukučínov,587
+Šarišské Sokolovce,587
+Cigeľka,587
+Trnava pri Laborci,586
+Strážne,585
+Smrdáky,584
+Nevidzany,583
+Brehov,583
+Liptovský Trnovec,583
+Myslina,583
+Lascov,583
+Terany,583
+Malá Mača,582
+Cernina,581
+Čamovce,581
+Zliechov,580
+Branovo,580
+Bačkovík,579
+Ipeľské Predmostie,578
+Bziny,578
+Trstená na Ostrove,578
+Keť,577
+Čučma,576
+Horná Mariková,576
+Danišovce,575
+Okrúhle,574
+Medzibrodie nad Oravou,572
+Cerovo,572
+Vernár,572
+Závada,571
+Mad,571
+Horná Seč,570
+Podkriváň,569
+Olejníkov,569
+Veľká Čalomija,568
+Tupá,568
+Kotrčiná Lúčka,568
+Hrabičov,568
+Horné Turovce,567
+Sirník,567
+Prochot,567
+Jalovec,566
+Pečeňady,565
+Látky,564
+Kameničany,563
+Lipník,563
+Častkov,563
+Jastrabá,562
+Slovenská Volová,561
+Stročín,561
+Oľdza,559
+Ďanová,559
+Pichne,559
+Kosihovce,559
+Trenč,558
+"Kvačany, Liptovský Mikuláš District",558
+Príbelce,558
+Šindliar,557
+Horná Lehota,557
+Benkovce,557
+Kučín,556
+Veľké Hoste,554
+Železná Breznica,554
+Ochtiná,554
+Malé Ripňany,553
+Stuľany,553
+Rokytov,552
+Radobica,552
+Pčoliné,551
+Remetské Hámre,551
+Staré Hory,551
+Čeľovce,550
+Slovenská Nová Ves,548
+Tachty,548
+Čerenčany,548
+Nová Ves nad Váhom,548
+Šimonovce,546
+Báč,546
+Malý Čepčín,545
+Nižná,545
+Pača,544
+Pavlice,544
+Horná Ždaňa,544
+Vrbová nad Váhom,543
+Orovnica,543
+Matejovce nad Hornádom,543
+Sedliacka Dubová,542
+Lenartovce,542
+Hnilčík,542
+Podzámčok,542
+"Silica, Rožňava District",542
+Mokrá Lúka,540
+Dolné Semerovce,540
+Nižný Tvarožec,539
+Súlovce,539
+Ostrý Grúň,539
+Kalná Roztoka,539
+Prietržka,538
+Rudno nad Hronom,538
+Kolonica,538
+Závadka,538
+Klubina,537
+Uhorská Ves,537
+Lipovník,537
+Slatinské Lazy,537
+Husiná,536
+Turčiansky Peter,536
+Tibava,536
+Zbudza,535
+Martin nad Žitavou,535
+Radimov,535
+Poluvsie,535
+Beňadiková,533
+Koškovce,533
+Uzovce,532
+Lipníky,532
+Svätá Mária,532
+Medveďov,532
+Kladzany,531
+Babiná,529
+Hurbanova Ves,529
+Žikava,528
+Mankovce,528
+Rimavská Baňa,528
+Malé Kršteňany,527
+Podrečany,527
+Rajčany,527
+Patince,527
+Hruboňovo,526
+Radvaň nad Laborcom,526
+Kamienka,526
+Krásno,526
+Mýto pod Ďumbierom,525
+Malé Ozorovce,525
+Dolná Seč,525
+Rimavské Brezovo,525
+Velušovce,524
+Tušická Nová Ves,524
+Kocurany,523
+Mestečko,523
+Trnávka,522
+Dlhá Ves,522
+Vyšný Medzev,522
+Bukovce,522
+Pečeňany,521
+Porúbka,521
+Nýrovce,520
+Slovenské Ďarmoty,520
+Lúčka,520
+Hubina,519
+Kočín-Lančár,519
+Veľká Čausa,519
+Ruskovce,519
+Vojka,518
+Pušovce,517
+Dobrohošť,517
+Hervartov,516
+Šalgovce,516
+Uhorské,515
+Štôla,514
+Hubošovce,514
+Čeľadince,514
+Dolný Vadičov,513
+Kalnište,513
+Hiadeľ,512
+Mlynky,512
+Hýľov,512
+Čaradice,512
+Dvorníky-Včeláre,512
+Slaská,511
+Hrabovec,510
+Bertotovce,510
+Šišov,510
+Kostolná Ves,510
+Tuhrina,509
+Šútovo,509
+Duplín,509
+Vyšná Hutka,508
+Klenová,508
+Sap,508
+Dubovec,506
+Kačanov,506
+Poľany,506
+Horné Naštice,506
+Šrobárová,505
+Hokovce,505
+Komárany,505
+Červená Voda,505
+Horná Breznica,505
+Timoradza,504
+Brezolupy,504
+Nová Polhora,504
+Rimavské Brezovo,504
+Pažiť,504
+Zemplínsky Branč,504
+Hankovce,503
+Veľké Revištia,503
+Choňkovce,502
+Veľká Lesná,502
+Lipovce,501
+Hrabovec nad Laborcom,501
+Choča,501
+Letničie,500
+Ihráč,499
+Ľubovec,498
+Zbrojníky,498
+Rad,498
+Veľké Chlievany,498
+Veľké Zlievce,498
+Hromoš,498
+Melek,497
+Krásna Ves,496
+Ješkova Ves,496
+Pastovce,495
+Bodiná,493
+Kobeliarovo,493
+Jánovce,492
+Gaboltov,492
+Šterusy,491
+Diaková,491
+Malý Krtíš,490
+Okružná,489
+Čavoj,488
+Boldog,488
+Horná Krupá,488
+Dobrá,488
+Lesnica,488
+Lesenice,487
+Jastrabie nad Topľou,487
+Jalšové,487
+Ľutina,487
+Kšinná,486
+Vyšný Hrušov,486
+Zemplínske Kopčany,486
+Smolnícka Huta,485
+Brestovec,485
+Slopná,484
+Nová Bašta,483
+Hažín,482
+Studenec,482
+Klokoč,481
+Hrašné,481
+Jurová,480
+Málaš,480
+Malé Lednice,480
+Čeláre,480
+Oreské,480
+Tisinec,478
+Hrubov,478
+Rovné,478
+Buzitka,478
+Pribiš,478
+Gortva,478
+Kordíky,477
+Vlkovce,477
+Žiar,477
+"Jamník, Liptovský Mikuláš District",477
+Čoltovo,477
+Kosorín,476
+Viničky,476
+Nemcovce,476
+Modrová,476
+Kuraľany,475
+Dvorec,475
+Holiare,474
+Krajná Bystrá,474
+Slavec,473
+Uzovské Pekľany,472
+Očkov,472
+Gôtovany,471
+Šurice,471
+Obišovce,471
+Dolinka,470
+Vyšný Klátov,470
+"Jablonka, Myjava District",470
+Kružná,469
+Borová,467
+Habura,467
+Krásny Brod,467
+Sazdice,465
+Lukačovce,465
+Tehla,465
+Janovce,465
+Šalgočka,465
+Slanské Nové Mesto,464
+"Rovné, Humenné District",464
+Bajany,463
+Banský Studenec,463
+Vieska nad Žitavou,463
+Železník,462
+"Háj, Turčianske Teplice District",462
+Egreš,461
+Ptrukša,461
+Vojka nad Dunajom,460
+Forbasy,459
+Chrámec,458
+Karná,458
+Ducové,457
+Veľká Tŕňa,457
+Tvrdomestice,456
+Pozba,456
+Závadka,456
+Zlatá Baňa,456
+Zlatno,455
+Magnezitovce,455
+Komárov,455
+Malý Lipník,455
+Malý Cetín,452
+Slatina nad Bebravou,452
+Martinček,452
+Hankovce,451
+Lesné,451
+Kapišová,450
+Kalameny,450
+Čerín,450
+Čekovce,450
+Petrovce,450
+Chmeľovec,449
+Klížska Nemá,449
+Majerovce,449
+Žitná-Radiša,448
+Veľké Vozokany,448
+Brestov,448
+Mestisko,447
+Nižný Lánec,447
+Turová,446
+Macov,446
+Vyšná Slaná,445
+České Brezovo,444
+Šutovce,444
+Mierovo,444
+Obeckov,444
+Čierna,444
+Figa,442
+Kaluža,442
+Dlhá,441
+Slovany,441
+Nová Ves,441
+Lopušné Pažite,441
+Vrícko,440
+Ondrejovce,440
+"Závada, Veľký Krtíš District",440
+Dolná Mičiná,439
+Dedina Mládeže,438
+Malý Kamenec,438
+Hoste,437
+Roztoky,436
+Sikenička,436
+Nedašovce,435
+Bretejovce,434
+Lieskovec,434
+Rovensko,434
+Horný Lieskov,434
+Ďapalovce,433
+Žarnov,433
+Mojtín,432
+"Bukovec, Myjava District",431
+Čelovce,431
+Pakostov,431
+Kraľovany,430
+Horňany,429
+Holčíkovce,428
+Hrabovka,427
+Merašice,426
+Sedmerovec,426
+Havaj,425
+Opatovce,425
+Jasenová,425
+Veľká Ves,424
+Radoma,424
+Štvrtok,424
+Nižná Olšava,423
+Jenkovce,423
+Nemešany,422
+Vojkovce,422
+Veľké Pole,421
+Krčava,421
+Bajerov,420
+Telince,420
+Kľače,419
+Holčíkovce,419
+Turčianske Jaseno,419
+Červený Hrádok,419
+Podhradík,418
+Vaľkovňa,418
+Dúbravica,418
+Sušany,418
+Lesíček,418
+Hriadky,417
+Hronská Dúbrava,417
+Rybky,417
+Košariská,415
+Vlky,415
+Radošovce,415
+Čižatice,414
+Koromľa,414
+Hnilec,414
+Žitavce,412
+Kvakovce,412
+Môlča,412
+Belža,411
+Gemerské Dechtáre,411
+Fulianka,411
+Malá Hradná,411
+Nižná Rybnica,410
+Debraď,409
+Malé Hoste,409
+Rákoš,409
+Klokočov,409
+Devičany,408
+Suché,407
+Porúbka,407
+"Vieska, Dunajská Streda District",407
+Pavlovce,406
+Komárovce,405
+Kosihy nad Ipľom,405
+Veľká Ves nad Ipľom,405
+Nevoľné,405
+Tarnov,404
+Ľubá,404
+Vyšné Remety,403
+Tŕnie,403
+Proč,402
+Chyžné,402
+Dačov Lom,401
+Stanča,399
+Horné Pršany,398
+Malá nad Hronom,398
+Brezovička,398
+Rudinka,397
+Henckovce,397
+Kopernica,397
+Polianka,396
+Lehôtka pod Brehmi,396
+Bretka,396
+Kaľava,395
+Hudcovce,395
+Oreské,395
+Baškovce,395
+Otrhánky,394
+Naháč,394
+Seč,394
+Pavčina Lehota,393
+Zacharovce,393
+Vyšná Voľa,393
+Milhosť,392
+Zlatá Idka,392
+Bunkovce,392
+Hosťová,392
+Paňa,392
+Bajtava,392
+Kynceľová,391
+Ňagov,390
+Bádice,390
+Vlkyňa,389
+Vyšná Rybnica,389
+"Peder, Košice-okolie District",389
+Točnica,388
+Jakubova Voľa,388
+Štefanová,388
+Kysta,388
+Nižný Kručov,387
+Veterná Poruba,387
+Dolné Otrokovce,386
+Kurimka,386
+Nezbudská Lúčka,386
+Malé Chyndice,386
+Janovík,385
+Vyšný Orlík,385
+Čečehov,385
+Belince,384
+Cabov,383
+Oľšov,383
+Hrašovík,383
+Rohov,383
+Chropov,382
+Drženice,382
+Nitra nad Ipľom,381
+Rakovo,381
+Bodza,381
+Malé Kozmálovce,381
+Štrkovec,380
+Sklené Teplice,380
+Tekovský Hrádok,380
+Horné Chlebany,379
+Malé Kosihy,379
+Poliakovce,379
+Jabloň,378
+Beša,378
+Liptovské Kľačany,378
+Šambron,376
+Lukavica,374
+Hlivištia,373
+Lazisko,372
+Breziny,371
+Šarkan,371
+Údol,371
+Liptovský Jakubovany,370
+Kurimany,369
+Haláčovce,369
+Horné Dubové,369
+Chmeľová,369
+Brezov,369
+Kravany,366
+Rumince,366
+Pusté Čemerné,366
+Lieskovany,365
+Gemerské Teplice,365
+Veľká Čierna,365
+Čermany,363
+Kľúčovec,362
+Veľopolie,362
+Dolný Chotár,361
+Blahová,360
+Šivetice,360
+Muľa,359
+"Rákoš, Košice-okolie District",359
+Krivosúd-Bodovka,358
+Zbehňov,358
+Sebedín-Bečov,358
+Osrblie,357
+Malá Tŕňa,357
+Cakov,357
+Šarišská Trstená,356
+Vaniškovce,355
+Lehôtka,355
+Čelovce,355
+Priepasné,354
+Zubné,354
+Bartošova Lehôtka,354
+Hričovské Podhradie,354
+Bátorová,353
+Zemplín,353
+Bodovce,352
+Jazernica,352
+Šalov,352
+Kamenné Kosihy,351
+Benice,351
+Krížovany,351
+Ilija,350
+Jakovany,350
+Rimavské Zalužany,350
+Ratkovce,350
+Andrejová,350
+Ľuboreč,348
+Turany nad Ondavou,348
+Píla,347
+Kružno,347
+Klieština,346
+Chvojnica,346
+Kusín,345
+Hajná Nová Ves,345
+Kostoľany pod Tribečom,344
+Vyšná Sitnica,344
+Pravotice,343
+Boheľov,343
+Stránska,341
+Bašovce,340
+Veľká Franková,340
+Dubinné,339
+Vozokany,339
+Hodkovce,339
+Pašková,339
+Tuhár,339
+Miňovce,339
+Veľké Chyndice,338
+Horňa,338
+"Abrahámovce, Bardejov District",337
+Podhoroď,337
+Honce,336
+Čierne Pole,336
+Rešica,335
+Hrušov,335
+Blesovce,335
+Sečianky,335
+Reľov,333
+Malé Vozokany,333
+Lopašov,332
+Koňuš,332
+Otročok,332
+Dolná Trnávka,332
+Vyšná Kamenica,331
+Jelšovec,331
+Malá Čierna,331
+Ostrov,330
+Kristy,330
+Nová Kelča,330
+Frička,330
+Nižné Nemecké,329
+Vyšný Čaj,329
+Hrabovčík,329
+Rakytník,329
+Dúbrava,329
+Vrbovka,329
+Ratka,329
+Podhorie,329
+Nižné Ladičkovce,328
+Hunkovce,328
+Bajka,328
+Tichý Potok,327
+Želmanovce,327
+Janov,327
+Šuja,327
+Bellova Ves,326
+Orešany,325
+Mašková,325
+Kečovo,324
+Torysky,324
+Rochovce,324
+Čertižné,323
+Konrádovce,323
+Kučín,323
+Norovce,323
+Stará Huta,322
+Veľký Slivník,322
+Čabalovce,322
+Štefanovičová,321
+Bory,321
+Vígľašská Huta-Kalinka,320
+Bulhary,320
+Čabiny,320
+Nemečky,320
+Dubové,320
+Valice,319
+Belá,319
+Kováčovce,318
+Veľká Lodina,318
+Demänovská Dolina,317
+Nižný Orlík,317
+Gočovo,316
+Vlkas,316
+Liptovské Matiašovce,314
+Slatina,312
+Lipovník,311
+Zboj,311
+Galovany,311
+Jalovec,311
+Lopúchov,311
+Šandal,310
+Revúcka Lehota,310
+Virt,309
+Luhyňa,309
+Brusnica,308
+Slatvina,308
+Leľa,308
+Turnianska Nová Ves,308
+Stará Bašta,308
+Vojňany,307
+Ladmovce,307
+Hontianske Trsťany,306
+Devičie,305
+Stebník,305
+Ostrá Lúka,305
+Sulín,305
+Miklušovce,305
+Nevidzany,304
+Bušovce,304
+Ratkovské Bystré,304
+Rešov,303
+Turcovce,303
+Stakčínska Roztoka,302
+Trsťany,302
+Liptovský Michal,301
+Dolný Kalník,301
+Víťazovce,300
+Šarišské Čierne,300
+Šípkové,300
+Gemerský Sad,299
+Medzianky,299
+Tepličky,299
+Nižná Sitnica,299
+Vydrná,297
+Jastrabie pri Michalovciach,297
+Kašov,296
+Janice,296
+Brhlovce,296
+Košický Klečenov,296
+Leštiny,296
+Juskova Voľa,296
+Podhradie,295
+Malé Zlievce,294
+Žipov,294
+Ruský Hrabovec,292
+Teplý Vrch,292
+Hrkovce,291
+Matiaška,290
+Osturňa,290
+Fekišovce,290
+Šiatorská Bukovinka,289
+Ozdín,288
+Turčok,287
+Veľké Raškovce,287
+Krtovce,287
+Herľany,286
+Nižný Čaj,286
+Jasenov,286
+Neporadza,286
+Zboj,285
+Hrišovce,285
+Trnovec,285
+Tročany,284
+Podhradie,284
+Pavlova Ves,284
+Miezgovce,283
+Kvačany,283
+Livinské Opatovce,283
+Bohúňovo,282
+Bajerovce,281
+Becherov,280
+Buglovce,280
+Rokytov pri Humennom,280
+Trnovo,280
+Dukovce,280
+Bara,280
+Kotmanová,279
+Turík,279
+Ráztoka,279
+Kleňany,278
+Priekopa,278
+Lehota nad Rimavicou,277
+Ivanice,277
+Repište,276
+Michalok,276
+Mikušovce,275
+Tajná,275
+Nižná Voľa,274
+Ipeľské Úľany,274
+Bodíky,274
+Nandraž,274
+Čechy,274
+Studená,273
+Remeniny,273
+Kiarov,273
+Kochanovce,272
+Kesovce,271
+Potônske Lúky,271
+Nižný Mirošov,270
+Jankovce,270
+Horný Pial,268
+Vyšné Valice,268
+Ladomirov,267
+Malé Zálužie,266
+Vislanka,265
+Rykynčice,265
+Solčianky,265
+Harhaj,264
+Volica,264
+Šarišský Štiavnik,264
+Sucháň,264
+Borčany,263
+Nemcovce,261
+Voľa,261
+Kalinov,261
+Hendrichovce,261
+Dolný Harmanec,261
+Lukavica,261
+Olováry,260
+Oľka,260
+Vyšný Slavkov,260
+Krahule,259
+Ladzany,258
+Žíp,258
+Hronská Breznica,258
+Pochabany,258
+Porúbka,257
+Kubáňovo,256
+Oľšavica,256
+Ďurďoš,256
+Nolčovo,255
+Kremnické Bane,255
+Horné Strháre,254
+Dražice,254
+Kečkovce,254
+Dulovo,254
+Hincovce,253
+Lechnica,252
+Hostovice,252
+Ruskovce,252
+Nová Sedlica,251
+Trnkov,251
+Staškovce,251
+Dolný Badín,250
+Višňov,250
+Abrahámovce,250
+Donovaly,249
+Bočiar,249
+Varadka,248
+Vrchteplá,248
+Kostolec,248
+Píla,248
+Lužany pri Topli,248
+Háj,248
+Lipovany,246
+Vojnatina,246
+Rovňany,246
+Biskupová,246
+Uličské Krivé,245
+Paština Závada,244
+Veľký Čepčín,244
+Malatíny,244
+Koláre,243
+Domadice,242
+Chvojnica,242
+Slizké,242
+Orechová,241
+Bodorová,240
+Hradište,240
+Ďurková,239
+Socovce,239
+Slanská Huta,239
+Ľudovítová,239
+Levkuška,239
+Klenov,239
+Krušinec,238
+Krivoklát,238
+Vyšné Nemecké,238
+Dedinky,237
+Lomné,236
+Čabradský Vrbovok,235
+Moštenica,233
+Hnojné,232
+Baškovce,232
+Koceľovce,231
+Večelkov,231
+Veľkrop,231
+Babie,230
+Podkylava,230
+Vlača,230
+Iňa,229
+Hostišovce,229
+Gočaltovo,228
+Malá Lodina,228
+Lom nad Rimavicou,228
+Muránska Zdychava,228
+Adidovce,227
+Prosiek,226
+Budince,226
+Chudá Lehota,226
+Vlača,226
+Soľnička,225
+Bielovce,225
+Ďurková,224
+Porúbka,223
+Špania Dolina,223
+Konská,223
+Martinová,223
+Vršatské Podhradie,222
+Malé Raškovce,222
+Ardanovce,221
+Lužany,221
+Malužiná,221
+Baláže,221
+Nový Salaš,221
+Nižná Polianka,221
+Drienčany,220
+Dolná Ves,220
+Trstené,220
+Blatné Revištia,220
+Uloža,220
+Červený Kláštor,219
+Ábelová,219
+Rakša,219
+Radvanovce,218
+Riečka,218
+Pusté Pole,217
+Lišov,217
+Rozložná,217
+Skerešovo,216
+Svinice,216
+Bžany,215
+Turá,215
+Mlynárovce,215
+Drňa,215
+Ruská Poruba,214
+Pavlová,213
+Domaníky,213
+Jasenovce,213
+Medovarce,213
+Krivé,212
+Krajná Poľana,212
+Temeš,212
+Dúbrava,212
+Valkovce,212
+Prosačov,211
+Zlatno,211
+Horné Plachtince,210
+Súdovce,209
+Jabloňovce,209
+Pinciná,208
+Chrastince,208
+Petrovce,208
+Inovce,207
+Budiná,207
+Nová Lehota,207
+Starý Hrádok,207
+Buclovany,207
+Kručov,206
+Lupoč,206
+Kyselica,206
+Trebejov,206
+Kociha,205
+Tomášovce,205
+Suchá Dolina,204
+Stebnícka Huta,204
+Beňadikovce,204
+Hačava,203
+Modrovka,203
+Hosťovce,202
+Slančík,201
+Kunešov,201
+Petrovce,201
+Vislava,201
+Dubová,200
+Lenka,200
+Rudno,200
+Brežany,199
+Muránska Lehota,199
+Petrova Lehota,199
+Štefanovce,199
+Tašuľa,199
+Kalonda,198
+Dolné Strháre,198
+Porostov,198
+Slatinka nad Bebravou,198
+Sihla,197
+Bottovo,197
+Vieska,197
+Vyšný Hrabovec,197
+Budiš,196
+Opiná,196
+Vyšný Kazimír,195
+Klin nad Bodrogom,195
+Záskalie,194
+Ratkovo,194
+Bílkove Humence,194
+Chvalová,194
+Malá Čalomija,193
+Hraničné,193
+Nižný Skálnik,193
+Palota,193
+Dekýš,193
+Sejkov,192
+Ortuťová,192
+Lúčky,192
+Pleš,191
+Petrikovce,191
+Oľšavka,191
+Bodzianske Lúky,191
+Širákov,190
+Stará Voda,190
+Prša,190
+"Senné, Veľký Krtíš District",190
+Vyšná Jedľová,189
+Beňatina,189
+Výrava,189
+Gribov,189
+Jalšovík,188
+Vyšný Kazimír,188
+Černochov,188
+Dolné Zahorany,188
+Stráňany,187
+Baňa,187
+Sása,186
+Horný Kalník,186
+Oľšavka,186
+Svrbice,186
+Horné Mladonice,186
+Vyšné Ladičkovce,185
+Malá Franková,185
+Kapince,184
+Kožuchov,184
+Meliata,183
+Silická Jablonica,182
+Kolibabovce,182
+Sklabinský Podzámok,181
+Pinkovce,180
+Lúčka,180
+Mošurov,180
+Uhliská,180
+Kľak,180
+Belín,179
+Renčišov,179
+Nové Hony,179
+Nižný Komárnik,178
+Muránska Huta,178
+Abramová,178
+Uňatín,177
+Oravce,177
+Kolbovce,177
+Horný Badín,177
+Tatranská Javorina,177
+Pokryváč,177
+Lažany,176
+Drábsko,176
+Husák,176
+Stará Lehota,175
+Vyšné nad Hronom,175
+Lula,175
+Ľutov,174
+Trnávka,172
+Hodejovec,172
+Baldovce,172
+Hrušovo,172
+Višňové,171
+Turčiansky Ďur,171
+Bobrovček,170
+Horný Tisovník,170
+Malé Ludince,170
+Záborie,170
+Slovenské Kľačany,170
+Beharovce,169
+Trebušovce,169
+Osádka,169
+Veľké Straciny,168
+Baďan,167
+Blatná Polianka,166
+Oľšavce,165
+Dlžín,165
+Lúčina,165
+Šašová,164
+Bystrá,164
+Močiar,163
+Rafajovce,163
+Seniakovce,163
+Nižná Boca,163
+Lukovištia,163
+Zbojné,162
+Čukalovce,162
+Blažovce,162
+Seľany,162
+Rokytovce,161
+Kozelník,161
+Vieska nad Blhom,161
+Orávka,161
+Poľanovce,160
+Turecká,159
+Topoľa,159
+Nižné Repaše,159
+Bacúrov,158
+Ardovo,158
+Rybník,158
+Ordzovany,158
+Kozí Vrbovok,156
+Dedačov,156
+Stretavka,156
+Sádočné,155
+Huty,155
+Ležiachov,155
+Zádiel,155
+Černina,154
+Lacková,154
+Sukov,153
+Horná Strehová,153
+Malé Straciny,151
+Vyšný Kručov,151
+Vyšný Skálnik,150
+Žemliare,150
+Markuška,150
+Dubno,150
+Osadné,150
+Brutovce,150
+Stankovce,150
+Folkušová,150
+Bohunice,149
+"Šípkov, Bánovce nad Bebravou Distric",149
+Padarovce,149
+Počarová,149
+Zombor,148
+Čelkova Lehota,148
+Byšta,148
+Záhorie (military district),147
+Nižná Jablonka,147
+Jestice,147
+Ratvaj,147
+Miková,146
+Borcová,146
+Fijaš,146
+Giglovce,146
+Zádor,145
+Kráľovce-Krnišov,144
+Makovce,144
+Gregorova Vieska,144
+Soboš,144
+Koválovec,144
+Ľuboriečka,144
+Povrazník,143
+Lipové,142
+Strihovce,142
+Svidnička,142
+Libichava,142
+Ďurďové,142
+Silická Brezová,142
+Čierny Potok,141
+Roškovce,141
+Zalaba,141
+Úhorná,141
+Turčianky,140
+Veľký Lom,138
+Varechovce,138
+Beluj,137
+Brieštie,136
+Rakovčík,136
+Petkovce,135
+Kraskovo,133
+Bzovská Lehôtka,132
+Vyškovce,132
+Gruzovce,132
+Bobrovník,132
+Tekolďany,132
+Slavoška,132
+Vysoká,129
+Ruský Potok,129
+Hubovo,128
+Polichno,128
+Breznička,127
+Pongrácovce,127
+Hanigovce,127
+Pečenice,127
+Ďurkovce,126
+Dolné Mladonice,126
+Píla,125
+Mičakovce,125
+Podskalie,125
+Malé Borové,124
+Mudroňovo,124
+Dubnička,124
+Jasenovo,123
+Mikulášová,122
+Geraltov,122
+Slovenské Krivé,121
+Vyšný Tvarožec,121
+Vysoká,121
+Laskár,120
+Stratená,120
+Drážovce,119
+Čičmany,119
+Repejov,119
+Livina,118
+Pravica,118
+"Rovné, Rimavská Sobota District",118
+Matovce,117
+Piskorovce,117
+Rašice,117
+Vagrinec,116
+Zbudská Belá,116
+Pohronský Bukovec,116
+Malá Poľana,115
+Lúčka,114
+Majere,114
+Brusník,114
+Glabušovce,113
+Selce,113
+Kecerovský Lipovec,113
+Horné Zahorany,113
+Bukovina,112
+Žiar,111
+Karlová,111
+Čierna Lehota,110
+Opava,110
+Tovarnianska Polianka,110
+Vyšná Polianka,109
+Vysočany,109
+Ruská Bystrá,108
+Ruská Kajňa,108
+Trpín,107
+Chrťany,107
+Drienovo,107
+"Štefanovce, Vranov nad Topľou District",107
+Vyšná Boca,106
+Brestov nad Laborcom,106
+Štefurov,105
+Motyčky,105
+Svätuš,105
+Petrovo,105
+Kožany,104
+Nižná Jedľová,104
+Brezovka,104
+Opátka,103
+Bogliarka,103
+Chorváty,103
+Cimenná,101
+Mládzovo,101
+Henclová,100
+Sopkovce,100
+Vojtovce,98
+Potok,98
+Hradisko,96
+Hutka,96
+Gemerček,96
+Daletice,96
+Liptovská Anna,95
+Lackov,95
+Suché Brezovo,94
+Kremná,94
+Legnava,94
+Selce,93
+Nový Svet,92
+Ondrašová,92
+Dlhoňa,91
+Ižkovce,91
+Tokajík,90
+Ivančiná,90
+Lipovec,90
+Kobylnice,90
+Šemetkovce,90
+Korytné,89
+Svetlice,89
+Ižipovce,89
+Bunetice,89
+Polina,89
+Gemerské Michalovce,88
+Potoky,88
+Vyšné Repaše,87
+Šoltýska,86
+Počúvadlo,86
+Ruská Voľa,86
+Sudince,85
+Ruská Volová,85
+Kaľamenová,85
+Zálesie,84
+Jurkova Voľa,84
+Hanková,83
+Nižná Pisaná,83
+Ruská Voľa,83
+Lentvora,82
+Michajlov,82
+Mrázovce,81
+Šmigovec,81
+Jedlinka,80
+Vyšný Komárnik,80
+Leváre,80
+Liptovské Beharovce,80
+Ruská Voľa nad Popradom,80
+Krajné Čierno,79
+Ďubákovo,79
+Čremošné,79
+Zemiansky Vrbovok,78
+Runina,77
+Španie Pole,76
+Korejovce,76
+Korunková,76
+Jezersko,76
+Haluzice,75
+Praha,75
+Zlatník,74
+Šuľa,74
+Nechválova Polianka,74
+Cigla,74
+Prihradzany,73
+Žibritov,73
+Ploské,71
+Lipová,70
+Moškovec,70
+Potôčky,70
+Hajtovka,68
+Kolbasov,68
+Nová Polianka,66
+Mudrovce,65
+Kyjatice,65
+Vyšná Pisaná,65
+Vladiča,65
+Závada,65
+Kríže,64
+Jalová,64
+Brdárka,63
+Livov,62
+Budikovany,62
+Babinec,60
+Ondrašovce,60
+Bodružal,60
+Višňové,59
+Harakovce,58
+Kováčová,57
+Hrabová Roztoka,57
+Matysová,56
+Pstriná,56
+Liešno,56
+Hrlica,56
+Miroľa,56
+Vavrinec,55
+Girovce,55
+Krná,54
+Detrík,54
+Starina,52
+Maškovce,52
+Vyšná Jablonka,51
+Jesenské,49
+Kožuchovce,48
+Príslop,47
+Regetovka,46
+Dobroslava,46
+Livovská Huta,45
+Ratkovská Lehota,45
+Veľké Borové,45
+Havka,45
+Medvedie,44
+Rohožník,44
+Valentovce,42
+Ratkovská Suchá,42
+Pavľany,42
+Prituľany,41
+Trebichava,41
+Jakušovce,40
+Vápeník,40
+Omastiná,40
+Brezovec,39
+Jarabá,39
+Uhrovské Podhradie,39
+Michalková,37
+Krajná Porúbka,35
+Soľník,35
+Červeňany,34
+Krišlovce,32
+Lešť,31
+Obručné,26
+Belejovce,24
+Poproč,23
+Krokava,23
+"Potok, Rimavská Sobota District",21
+Bystrá,21
+Parihuzovce,20
+Oľšinkov,20
+Šarbov,17
+Ondavka,15
+Havranec,15
+Príkra,12
+Valaškovce,0

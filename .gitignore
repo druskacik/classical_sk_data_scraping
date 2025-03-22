@@ -2,6 +2,8 @@ data/*
 .venv
 
 !data/.gitkeep
+!data/cities_with_postal_code.csv
+!data/cities_by_population.csv
 
 __pycache__
 .env

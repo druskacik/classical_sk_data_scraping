@@ -35,8 +35,8 @@ def upload_concerts(data: list[dict]):
     if new_concerts:
         for concert in new_concerts:
             cursor.execute(
-                "INSERT INTO classical_concert (title, date, source, source_url, time_from, time_to, city, venue, url, type) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "INSERT INTO classical_concert (title, date, source, source_url, time_from, time_to, city, venue, url, type, description) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     concert['title'], 
                     concert['date'], 
@@ -47,7 +47,8 @@ def upload_concerts(data: list[dict]):
                     concert['city'], 
                     concert['venue'],
                     concert['url'], 
-                    concert.get('type')
+                    concert.get('type'),
+                    concert.get('description')
                 )
             )
             inserted_count += 1
@@ -90,8 +91,8 @@ def upload_potential_concerts(data: list[dict]):
     if new_concerts:
         for concert in new_concerts:
             cursor.execute(
-                "INSERT INTO potential_event (title, date, source, source_url, time_from, time_to, city, venue, url, type) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "INSERT INTO potential_event (title, date, source, source_url, time_from, time_to, city, venue, url, type, description) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     concert['title'], 
                     concert['date'], 
@@ -102,7 +103,8 @@ def upload_potential_concerts(data: list[dict]):
                     concert['city'], 
                     concert['venue'],
                     concert['url'], 
-                    concert.get('type')
+                    concert.get('type'),
+                    concert.get('description')
                 )
             )
             inserted_count += 1
