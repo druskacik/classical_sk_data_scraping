@@ -1,22 +1,27 @@
-
 import schedule
 import time
+import importlib
+import os
+from pathlib import Path
 
-from crawlers.filharmonia_sk.main import main as filharmonia_sk_main
-from crawlers.konvergencie_sk.main import main as konvergencie_sk_main
-from crawlers.sfk_sk.main import main as sfk_sk_main
-from crawlers.snd_sk.main import main as snd_sk_main
-from crawlers.skozilina_sk.main import main as skozilina_sk_main
-from crawlers.stateopera_sk.main import main as stateopera_sk_main
-from crawlers.kpvh_sk.main import main as kpvh_sk_main
-from crawlers.sdke_sk.main import main as sdke_sk_main
-from crawlers.ticketportal_sk.main import main as ticketportal_sk_main
-from crawlers.simachart_weebly_com.main import main as simachart_weebly_com_main
-from crawlers.tootoot_fm.main import main as tootoot_fm_main
-from crawlers.goout_net.main import main as goout_net_main
-from crawlers.pkopresov_sk.main import main as pkopresov_sk_main
-
-from analyzers.analyze_potential_events import main as analyze_potential_events_main
+def discover_crawler_modules():
+    """Discover and import all crawler main functions"""
+    crawler_modules = []
+    crawlers_dir = Path(__file__).parent / 'crawlers'
+    
+    # Walk through all subdirectories in crawlers/
+    for crawler_dir in crawlers_dir.iterdir():
+        if crawler_dir.is_dir() and not crawler_dir.name.startswith('__'):
+            # Import the main module from each crawler
+            module_path = f"crawlers.{crawler_dir.name}.main"
+            try:
+                module = importlib.import_module(module_path)
+                if hasattr(module, 'main'):
+                    crawler_modules.append(module.main)
+            except ImportError as e:
+                print(f"Failed to import {module_path}: {e}")
+    
+    return crawler_modules
 
 def run_job(main_function):
     try:
@@ -25,40 +30,23 @@ def run_job(main_function):
         print(f"Error running {main_function.__name__}: {e}")
 
 if __name__ == "__main__":
+    # Discover all crawler modules
+    crawler_functions = discover_crawler_modules()
+    
+    # Add the analyzer function
+    from analyzers.analyze_potential_events import main as analyze_potential_events_main
+    crawler_functions.append(analyze_potential_events_main)
     
     print('Running crawlers...')
+    # Run all crawlers initially
+    for func in crawler_functions:
+        run_job(func)
     
-    run_job(filharmonia_sk_main)
-    run_job(konvergencie_sk_main)
-    run_job(sfk_sk_main)
-    run_job(snd_sk_main)
-    run_job(skozilina_sk_main)
-    run_job(stateopera_sk_main)
-    run_job(kpvh_sk_main)
-    run_job(sdke_sk_main)
-    run_job(ticketportal_sk_main)
-    run_job(simachart_weebly_com_main)
-    run_job(tootoot_fm_main)
-    run_job(goout_net_main)
-    run_job(pkopresov_sk_main)
-    run_job(analyze_potential_events_main)
-    
-    print("Sheduling crawlers...")
-    
-    schedule.every().day.at("01:00").do(lambda: run_job(filharmonia_sk_main))
-    schedule.every().day.at("01:01").do(lambda: run_job(konvergencie_sk_main))
-    schedule.every().day.at("01:02").do(lambda: run_job(sfk_sk_main))
-    schedule.every().day.at("01:03").do(lambda: run_job(snd_sk_main))
-    schedule.every().day.at("01:04").do(lambda: run_job(skozilina_sk_main))
-    schedule.every().day.at("01:05").do(lambda: run_job(stateopera_sk_main))
-    schedule.every().day.at("01:06").do(lambda: run_job(kpvh_sk_main))
-    schedule.every().day.at("01:07").do(lambda: run_job(sdke_sk_main))
-    schedule.every().day.at("01:08").do(lambda: run_job(ticketportal_sk_main))
-    schedule.every().day.at("01:09").do(lambda: run_job(simachart_weebly_com_main))
-    schedule.every().day.at("01:10").do(lambda: run_job(tootoot_fm_main))
-    schedule.every().day.at("01:11").do(lambda: run_job(goout_net_main))
-    schedule.every().day.at("01:12").do(lambda: run_job(pkopresov_sk_main))
-    schedule.every().day.at("01:13").do(lambda: run_job(analyze_potential_events_main))
+    print("Scheduling crawlers...")
+    # Schedule all crawlers to run at 1-minute intervals starting at 01:00
+    for i, func in enumerate(crawler_functions):
+        schedule_time = f"01:{i:02d}"  # Format: 01:00, 01:01, etc.
+        schedule.every().day.at(schedule_time).do(lambda f=func: run_job(f))
     
     while True:
         schedule.run_pending()
