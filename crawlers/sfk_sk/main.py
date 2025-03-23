@@ -1,6 +1,7 @@
 import datetime
 
 import requests
+from bs4 import BeautifulSoup
 
 import pandas as pd
 
@@ -51,6 +52,14 @@ def extract_concert_info(concert):
         'time_to': None,
         'venue': concert['location'],
     }
+    
+def extract_description(url):
+    print(url)
+    r = requests.get(url)
+    soup = BeautifulSoup(r.text, 'html.parser')
+    div = soup.find('div', class_='richtext', attrs={'aria-readonly': 'false'})
+    description = div.get_text().strip()
+    return description
 
 def main():
     # Get current date and date one year from now
@@ -71,6 +80,7 @@ def main():
         i += 1
     
     df = pd.DataFrame(concerts, columns=['title', 'date', 'url', 'time_from', 'time_to', 'venue'])
+    df['description'] = df['url'].apply(extract_description)
     df.insert(0, 'city', 'Košice')
     df.insert(0, 'source_url', 'https://www.sfk.sk')
     df.insert(0, 'source', 'Štátna filharmónia Košice')

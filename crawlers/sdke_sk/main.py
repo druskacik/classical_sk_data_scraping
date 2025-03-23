@@ -78,6 +78,12 @@ def extract_date_and_time(date_str):
     
     return date_obj, time_part
 
+def extract_description(url):
+    print(url)
+    r = requests.get(url)
+    soup = BeautifulSoup(r.text, 'html.parser')
+    description = soup.find('div', class_='field--name-field-play-description').get_text().strip()
+    return description
 
 def main():
     data_ids = extract_data_ids()
@@ -86,19 +92,25 @@ def main():
     for data_id in data_ids:
         concert = extract_concert_data(data_id)
         for i, obj in enumerate(concert):
+            path = obj['path']
+            if not path.startswith('/sk/balet') and not path.startswith('/sk/opera'):
+                continue
+            url = f"https://www.sdke.sk{path}"
             date = obj['dates'].split('|')[i]
             date_obj, time_part = extract_date_and_time(date)
+            description = extract_description(url)
             concert_data.append({
                 **obj,
-                'url': f"https://www.sdke.sk{obj['path']}",
+                'url': url,
                 'date': date_obj.strftime('%Y/%m/%d'),
                 'time_from': time_part,
                 'link': obj['links'].split('|')[i],
                 'type': extract_type(obj['path']),
+                'description': description
             })
 
         
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'type'])
+    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'type', 'description'])
     df = df[df['type'].isin(['Balet', 'Opera'])].reset_index(drop=True)
     df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
     

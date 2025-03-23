@@ -39,6 +39,7 @@ def extract_concert_info(concert):
     date = extract_date(info)
     venue = info.split(' / ')[1]
     time = extract_time(info)
+    description = concert.find('div', class_='tt-evt-li__sub-info--About').text.strip()
     return {
 		'title': title,
 		'url': url,
@@ -46,6 +47,7 @@ def extract_concert_info(concert):
 		'time_from': time,
 		'time_to': None,
 		'venue': validate_venue(venue),
+        'description': description,
 	}
     
 def main():
@@ -61,7 +63,7 @@ def main():
 
     concert_data = [c for c in concert_data if validate_concert(c)]
     
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'time_to', 'venue'])
+    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'time_to', 'venue', 'description'])
     df.insert(0, 'city', 'Bratislava')
     df.insert(0, 'source_url', 'https://www.konvergencie.sk')
     df.insert(0, 'source', 'Konvergencie')

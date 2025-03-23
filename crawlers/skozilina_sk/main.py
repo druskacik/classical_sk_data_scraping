@@ -9,6 +9,13 @@ import pandas as pd
 
 from ..classical import upload_concerts
 
+def extract_description(url):
+    print(url)
+    r = requests.get(url)
+    soup = BeautifulSoup(r.text, 'html.parser')
+    program = soup.find('div', class_='program')
+    return program.text.strip()
+
 def main():
     
     current_year = datetime.datetime.now().year
@@ -49,6 +56,8 @@ def main():
     }, inplace=True)
     
     df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
+    
+    df['description'] = df['url'].apply(extract_description)
 
     df.insert(0, 'source_url', 'https://skozilina.sk')
     df.insert(0, 'source', 'Štátny komorný orchester Žilina')

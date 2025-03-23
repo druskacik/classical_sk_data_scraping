@@ -4,7 +4,6 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 from ..classical import upload_concerts
-from ..formaters import format_date
 
 def extract_event_info(event):
     tag = event.find('span', class_='tag').find('a')
@@ -12,11 +11,18 @@ def extract_event_info(event):
     date_and_time = tag['data-date']
     date, time = date_and_time.split(' ')
     venue = tag['data-location']
+    
+    description = None
+    p = event.find('p', attrs={'dir': 'ltr'})
+    if p:
+        description = p.text.strip()
+        
     return {
 		'title': title,
-		'date': date.replace('-', '/'),
-		'time_from': time,
-		'venue': venue
+		'date': date,
+		'time': time,
+		'venue': venue,
+		'description': description
 	}
 
 
@@ -31,7 +37,7 @@ def main():
     concert_data = [extract_event_info(div) for div in concert_divs]
     print(f'Found {len(concert_data)} concerts')
         
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue'])
+    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue', 'description'])
     df.insert(0, 'city', 'Trnava')
     df.insert(0, 'url', url)
     df.insert(0, 'source_url', 'https://kultura.trnava.sk')

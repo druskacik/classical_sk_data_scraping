@@ -34,11 +34,6 @@ def is_classical_music_event(client, json_data):
     )
     return response.text
 
-def fetch_potential_events(conn):
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, url, venue, description FROM potential_event WHERE analyzed = false")
-    return cursor.fetchall()
-
 def update_potential_event(conn, id, is_classical_concert):
     cursor = conn.cursor()
     cursor.execute("UPDATE potential_event SET analyzed = true, is_classical_concert = %s WHERE id = %s", (is_classical_concert, id))
@@ -50,7 +45,7 @@ def upload_classical_concerts(conn):
     
     cursor.execute("""
         SELECT
-            id, title, date, url, source, source_url, time_from, time_to, city, venue, type
+            id, title, date, url, source, source_url, time_from, time_to, city, venue, type, description
         FROM potential_event
         WHERE is_classical_concert = true AND added = false;
     """)
@@ -67,9 +62,9 @@ def upload_classical_concerts(conn):
         
         if not exists:
             cursor.execute("""
-            INSERT INTO classical_concert (title, date, url, source, source_url, time_from, time_to, city, venue, type)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (concert[1], concert[2], concert[3], concert[4], concert[5], concert[6], concert[7], concert[8], concert[9], concert[10]))
+            INSERT INTO classical_concert (title, date, url, source, source_url, time_from, time_to, city, venue, type, description)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (concert[1], concert[2], concert[3], concert[4], concert[5], concert[6], concert[7], concert[8], concert[9], concert[10], concert[11]))
         else:
             skipped_count += 1
             
@@ -88,12 +83,12 @@ def main():
     DB_PORT = os.getenv('DB_PORT')
     
     conn = psycopg2.connect(dbname=DB_NAME, user=DB_USER, password=DB_PASS, host=DB_HOST, port=DB_PORT)
-    potential_events = fetch_potential_events(conn)
+    cursor = conn.cursor()  
+    cursor.execute("SELECT id, title, url, venue, description FROM potential_event WHERE analyzed = false")
+    potential_events = cursor.fetchall()
+    column_names = [desc[0] for desc in cursor.description]
     if len(potential_events) > 0:
-        cursor = conn.cursor()  
-        cursor.execute("SELECT id, title, url, venue, description FROM potential_event WHERE analyzed = false")
-        column_names = [desc[0] for desc in cursor.description]
-        for event in cursor.fetchall():
+        for event in potential_events:
             event_json = json.dumps(dict(zip(column_names, event)), ensure_ascii=False)
             output = is_classical_music_event(client, event_json)
             output = True if output == 'true' else False

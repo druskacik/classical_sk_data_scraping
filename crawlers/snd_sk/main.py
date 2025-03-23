@@ -54,6 +54,13 @@ def get_concert_data(url: str):
         data.append(extract_event_info(event))
     return data
 
+def extract_description(url):
+    print(url)
+    r = requests.get(url)
+    soup = BeautifulSoup(r.text, 'html.parser')
+    description = soup.find('meta', attrs={'property': 'og:description'})
+    return description.get('content').strip()
+
 
 def main():
     base_url = 'https://snd.sk/program/'
@@ -81,6 +88,8 @@ def main():
     df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'time_to', 'type'])
     df = df[df['type'].isin(['opera', 'balet'])]
     df['url'] = df['url'].apply(lambda x: f'https://snd.sk{x}')
+    df['description'] = df['url'].apply(extract_description)
+    
     df.insert(0, 'venue', 'Slovenské národné divadlo')
     df.insert(0, 'city', 'Bratislava')
     df.insert(0, 'source_url', 'https://snd.sk')

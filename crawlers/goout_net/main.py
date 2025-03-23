@@ -56,6 +56,7 @@ def extract_concert_data(response):
             'time_from': schedule['attributes']['startAt'].split('T')[1][:5],
             'time_to': schedule['attributes']['endAt'].split('T')[1][:5],
             'url': schedule['locales']['sk']['siteUrl'],
+            'description': event['locales']['sk']['description'],
         })
     
     return concert_data
@@ -70,7 +71,7 @@ def main():
     
     print(f'Found {len(concert_data)} concerts')
         
-    df = pd.DataFrame(concert_data, columns=['title', 'venue', 'city', 'date', 'time_from', 'time_to', 'url'])
+    df = pd.DataFrame(concert_data, columns=['title', 'venue', 'city', 'date', 'time_from', 'time_to', 'url', 'description'])
     df.insert(0, 'source_url', 'https://goout.net')
     df.insert(0, 'source', 'GoOut')
     

@@ -8,6 +8,7 @@ Requires-Dist: beautifulsoup4>=4.13.3
 Requires-Dist: curl-cffi>=0.10.0
 Requires-Dist: esprima>=4.0.1
 Requires-Dist: google-genai>=1.7.0
+Requires-Dist: jellyfish>=1.1.3
 Requires-Dist: lxml>=5.3.1
 Requires-Dist: pandas>=2.2.3
 Requires-Dist: psycopg2>=2.9.10

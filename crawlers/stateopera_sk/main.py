@@ -4,6 +4,7 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 from ..classical import upload_concerts
+from ..formaters import clean_string
 
 MONTH_TO_NUMBER = {
     'január': 1,
@@ -41,6 +42,14 @@ def extract_concert_info(concert):
         'time_from': time,
         'type': event_type,
 	}
+    
+def extract_description(url):
+    print(url)
+    r = requests.get(url)
+    soup = BeautifulSoup(r.content, 'html.parser')
+    description = soup.find('div', class_='longtext').text.strip()
+    description = clean_string(description)
+    return description
 
 def main():
     print('Getting concerts for stateopera.sk ...')
@@ -55,6 +64,7 @@ def main():
     print(f'Found {len(concert_data)} concerts')
         
     df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'type'])
+    df['description'] = df['url'].apply(extract_description)
     df.insert(0, 'venue', None)
     df.insert(0, 'city', 'Banská Bystrica')
     df.insert(0, 'source_url', 'https://www.stateopera.sk')

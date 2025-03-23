@@ -98,7 +98,16 @@ def extract_concert_info(div):
 		'venue': venue,
 		'city': city,
 	}
-
+    
+def extract_description(soup):
+    popis_section = soup.find('section', class_='popis')
+    if popis_section:
+        # Remove the ticket-guarantee-container div if it exists
+        guarantee_div = popis_section.find('div', class_='ticket-guarantee-container')
+        if guarantee_div:
+            guarantee_div.decompose()
+        return popis_section.get_text().strip()
+    return None
 
 
 def main():
@@ -115,16 +124,18 @@ def main():
         print(f'Processing {url}')
         r = requests.get(url)
         soup = BeautifulSoup(r.text, 'html.parser')
+        description = extract_description(soup)
         divs = soup.find_all('div', itemtype='http://schema.org/Event')
         for div in divs:
             concert_info = {
                 **extract_concert_info(div),
                 'url': url,
                 'organizer_url': extract_organizator_url(soup),
+                'description': description,
             }
             concert_data.append(concert_info)
     
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue', 'city', 'url', 'organizer_url'])
+    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue', 'city', 'url', 'organizer_url', 'description'])
     df.insert(0, 'source_url', 'https://www.ticketportal.sk')
     df.insert(0, 'source', 'Ticketportal.sk')
     df = df[~df['organizer_url'].isin(ALREADY_PARSED_ORGANIZERS)]

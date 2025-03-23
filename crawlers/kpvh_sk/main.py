@@ -1,3 +1,4 @@
+import re
 import requests
 
 import pandas as pd
@@ -45,6 +46,27 @@ def extract_concert_info(concert_div):
 		'venue': venue
 	}
 
+def clean_whitespace(text):
+    return re.sub(r'\s+', ' ', text).strip()
+    
+def clean_composer_name(name):
+    # Remove text in parentheses from composer name
+    # e.g., "Beethoven (1800)" -> "Beethoven"
+    for i, char in enumerate(name):
+        if char == '(' or char.isdigit():
+            return clean_whitespace(name[:i].strip())
+    return clean_whitespace(name)
+    
+def extract_composers(url):
+    print(url)
+    r = requests.get(url)
+    soup = BeautifulSoup(r.content, 'html.parser')
+    
+    content = soup.find('div', class_='mt-pricelist')
+    hs = content.find_all('h3')
+    composers = [clean_composer_name(h.text.strip()) for h in hs]
+    return list(set(composers))
+
 def main():
     print('Getting concerts for kpvh.sk ...')
     url = 'https://www.kpvh.sk/sezona-2024-2025/'
@@ -59,6 +81,7 @@ def main():
         
     df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'venue'])
     df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
+    df['composers'] = df['url'].apply(extract_composers)
     df.insert(0, 'city', 'Trenčín')
     df.insert(0, 'source_url', 'https://www.kpvh.sk')
     df.insert(0, 'source', 'Klub priateľov vážnej hudby')

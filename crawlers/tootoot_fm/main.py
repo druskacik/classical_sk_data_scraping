@@ -18,7 +18,8 @@ def extract_concert_info(concert):
 		'time_from': event['Begin'].split('T')[1][:5],
 		'time_to': event['End'].split('T')[1][:5],
 		'date': event['Begin'].split('T')[0].replace('-', '/'),
-		'url': f"https://tootoot.fm/sk/events/{event['_id']}"
+		'url': f"https://tootoot.fm/sk/events/{event['_id']}",
+		'description': event['About']
     }
 
 def main():
@@ -32,7 +33,7 @@ def main():
     
     print(f'Found {len(concert_data)} concerts')
         
-    df = pd.DataFrame(concert_data, columns=['title', 'venue', 'city', 'time_from', 'time_to', 'date', 'url'])
+    df = pd.DataFrame(concert_data, columns=['title', 'venue', 'city', 'time_from', 'time_to', 'date', 'url', 'description'])
     df.insert(0, 'source_url', 'https://tootoot.fm')
     df.insert(0, 'source', 'tootoot')
     

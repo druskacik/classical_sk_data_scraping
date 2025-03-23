@@ -58,12 +58,23 @@ def get_concert_data():
         })
     return data
 
+def get_concert_description(url):
+    """
+    Get concert description from filharmonia.sk
+    """
+    print(url)
+    r = requests.get(url)
+    soup = BeautifulSoup(r.content, 'lxml')
+    article = soup.find('article')
+    return article.text.strip()
+
 def main():
     print('Getting concerts for filharmonia.sk ...')
     concert_data = get_concert_data()
     print(f'Found {len(concert_data)} concerts')
         
     df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'venue'])   
+    df['description'] = df['url'].apply(get_concert_description)
     df.insert(0, 'city', 'Bratislava')
     df.insert(0, 'source_url', 'http://www.filharmonia.sk')
     df.insert(0, 'source', 'Slovenská filharmónia')

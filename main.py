@@ -35,7 +35,11 @@ if __name__ == "__main__":
     
     # Add the analyzer function
     from analyzers.analyze_potential_events import main as analyze_potential_events_main
+    from analyzers.get_composers import main as get_composers_main
+    from analyzers.process_composers import main as process_composers_main
     crawler_functions.append(analyze_potential_events_main)
+    crawler_functions.append(get_composers_main)
+    crawler_functions.append(process_composers_main)
     
     print('Running crawlers...')
     # Run all crawlers initially
@@ -43,9 +47,12 @@ if __name__ == "__main__":
         run_job(func)
     
     print("Scheduling crawlers...")
-    # Schedule all crawlers to run at 1-minute intervals starting at 01:00
+    # Schedule all crawlers to run at 2-minute intervals starting at 01:00
     for i, func in enumerate(crawler_functions):
-        schedule_time = f"01:{i:02d}"  # Format: 01:00, 01:01, etc.
+        n = 1 + 2*i
+        start_minute = n % 60
+        start_hour = n // 60
+        schedule_time = f"{start_hour:02d}:{start_minute:02d}"  # Format: 01:00, 01:02, etc.
         schedule.every().day.at(schedule_time).do(lambda f=func: run_job(f))
     
     while True:

@@ -24,6 +24,7 @@ def extract_concert_info(paragraph):
 		'time_from': time,
 		'venue': venue,
 		'city': city,
+		'description': paragraph.get_text().strip()
 	}
 
 def extract_concerts(soup):
@@ -48,7 +49,7 @@ def main():
     
     print(f'Found {len(concert_data)} concerts')
         
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue', 'city'])
+    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue', 'city', 'description'])
     df.insert(0, 'url', url)
     df.insert(0, 'source_url', 'https://simachart.weebly.com')
     df.insert(0, 'source', 'Simachart')
