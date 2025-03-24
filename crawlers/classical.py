@@ -29,13 +29,6 @@ def upload_concerts(data: list[dict], table_name: str = 'classical_concert'):
         if not exists:
             new_concerts.append(concert)
         else:
-            composers = concert.get('composers')
-            is_concert_details_filled = True if composers is not None else False
-            cursor.execute(
-                f"UPDATE {table_name} SET description = %s, composers = %s, is_concert_details_filled = %s WHERE id = %s",
-                (concert.get('description'), composers, is_concert_details_filled, exists[0])
-            )
-            print(f"Updated details for concert: {concert['title']}")
             skipped_count += 1
     
     inserted_count = 0
