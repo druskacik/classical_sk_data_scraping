@@ -11,7 +11,7 @@ load_dotenv()
 
 PROMPT = """
 You will receive composer name, and a JSON with ids and names of composers with similar names. Your role is to find the composer in the JSON and return the id.
-If the composer is not found, return None.
+If the composer is not found, return None. Output the ID of the composer only if you are absolutely sure that it's the correct composer.
 
 Composer name: {composer_name}
 

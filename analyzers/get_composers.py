@@ -8,7 +8,7 @@ from google import genai
 load_dotenv()
 
 PROMPT = """
-You will receive a JSON with title and description of a classical music event. Your role is to extract the names of the composers from the description.
+You will receive a JSON with title and description of a classical music event. Your role is to extract the names of composers whose music is being played at the given concert.
 
 Output your response as a JSON list like this:
 [
@@ -18,6 +18,7 @@ Output your response as a JSON list like this:
 ]
 
 Output full names of the composers, e.g. "Wolfgang Amadeus Mozart" or "Johann Sebastian Bach".
+Don't extract all composers that are mentioned in the description, only the ones whose music is being played at the concert!
 
 Here is the JSON:
 {json}
