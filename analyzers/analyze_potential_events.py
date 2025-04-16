@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import psycopg2
 from dotenv import load_dotenv
@@ -32,6 +33,9 @@ def is_classical_music_event(client, json_data):
 			},
 		},
     )
+    # Quota is 15 requests per minute
+    time.sleep(4)
+    
     return response.text
 
 def update_potential_event(conn, id, is_classical_concert):

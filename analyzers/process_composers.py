@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import psycopg2
 from dotenv import load_dotenv
@@ -37,6 +38,9 @@ def get_composer_id(client, composer_name, composers_dict):
 			},
 		},
     )
+    # Quota is 15 requests per minute
+    time.sleep(4)
+    
     return eval(response.text)
 
 def get_unprocessed_concerts(conn):

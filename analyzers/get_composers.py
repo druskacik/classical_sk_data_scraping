@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import psycopg2
 from dotenv import load_dotenv
@@ -37,6 +38,9 @@ def get_composers(client, json_data):
 			'response_schema': list[str],
 		},
     )
+    # Quota is 15 requests per minute
+    time.sleep(4)
+    
     return response.parsed
 
 def get_unprocessed_events(conn):
