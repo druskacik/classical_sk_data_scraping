@@ -1,7 +1,0 @@
-README.md
-pyproject.toml
-data_scraping.egg-info/PKG-INFO
-data_scraping.egg-info/SOURCES.txt
-data_scraping.egg-info/dependency_links.txt
-data_scraping.egg-info/requires.txt
-data_scraping.egg-info/top_level.txt
