@@ -7,10 +7,16 @@ WORKDIR /app
 COPY pyproject.toml ./
 
 # Install dependencies for postgres
-RUN apt-get update && apt-get install -y libpq-dev && apt-get install -y gcc
+RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
+    apt-get update && \
+    apt-get install -y libpq-dev gcc && \
+    # Clean up apt cache to reduce image size
+    rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
-RUN pip install .
+RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
+    # Use --no-cache-dir to reduce image size
+    pip install --no-cache-dir .
 
 # Copy the rest of the application code
 COPY . .
