@@ -43,12 +43,12 @@ def main():
     
     df = pd.DataFrame(concert_jsons)
     df = df[df['@type'] == 'Event'].copy()
-
+    df = df[df.location.notna()].copy()
     
     df['date'] = df['startDate'].apply(lambda x: x.split('T')[0])
     df['time_from'] = df['startDate'].apply(lambda x: x.split('T')[1])
     df['time_to'] = df['endDate'].apply(lambda x: x.split('T')[1])
-    df['venue'] = df['location'].apply(lambda x: x['name'])
+    df['venue'] = df['location'].apply(lambda x: x['name'] if not pd.isna(x) else None)
     df['city'] = df['location'].apply(lambda x: x['address'].get('addressLocality', 'Žilina'))
     
     df.rename(columns={
