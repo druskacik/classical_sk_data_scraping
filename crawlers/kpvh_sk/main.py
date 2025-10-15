@@ -69,7 +69,7 @@ def extract_composers(url):
 
 def main():
     print('Getting concerts for kpvh.sk ...')
-    url = 'https://www.kpvh.sk/sezona-2024-2025/'
+    url = 'https://www.kpvh.sk/sezona-2025-2026/'
     
     r = requests.get(url)
     soup = BeautifulSoup(r.content, 'html.parser')
