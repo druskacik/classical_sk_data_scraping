@@ -1,3 +1,5 @@
+import re
+from datetime import datetime
 import requests
 
 import pandas as pd
@@ -5,58 +7,19 @@ from bs4 import BeautifulSoup
 
 from ..classical import upload_concerts
 
-MONTHS_MAPPING = {
-    'Jan.': '01',
-    'Feb.': '02',
-    'Mar.': '03',
-    'Apr.': '04',
-    'Máj.': '05',
-    'Jún.': '06',
-    'Júl.': '07',
-    'Aug.': '08',
-    'Sep.': '09',
-    'Okt.': '10',
-    'Nov.': '11',
-    'Dec.': '12',
-}
-
-def convert_date(date_str):
-    """
-    Convert date string to format 'yyyy-mm-dd'
-    """
-    day = date_str.split(' ')[0].strip('.')
-    month = MONTHS_MAPPING[date_str.split(' ')[1]]
-    year = date_str.split(' ')[2].strip(',')
-    return f'{year}-{month}-{day}'
-
-def convert_time(date_str):
-    """
-    Convert time string to format 'HH:MM'
-    """
-    time = date_str.split(' ')[3]
-    if time == '00:00':
-        return None
-    return time
-
-def get_concert_data():
-    """
-    Get concert data from filharmonia.sk
-    """
-    url = 'http://www.filharmonia.sk/o-nas/archiv-slovenskej-filharmonie/sezona-2024-2025'
+def get_concerts():
+    today = str(datetime.today()).split()[0]
+    url = f'https://www.filharmonia.sk/events-feed?start={today}'
     r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'lxml')
-    concerts = soup.find_all('li', class_='koncerty')
-    data = []
-    for c in concerts:
-        date = c.find('span', class_='date').text
-        data.append({
-            'title': c.find('a', class_='title').text,
-            'url': c.find('a', class_='title')['href'],
-            'date': convert_date(date),
-            'venue': c.find('a', class_='venue').text,
-            'time_from': convert_time(date),
-        })
-    return data
+    concerts = r.json()
+    concerts = [{
+        'title': c['title'],
+        'date': c['start'].split('T')[0],
+        'time_from': c['start'].split('T')[1],
+        'time_to': c['end'].split('T')[1],
+        'url': f'https://filharmonia.sk{c["view_node"].removesuffix("/modal")}',
+    } for c in concerts]
+    return concerts
 
 def get_concert_description(url):
     """
@@ -64,17 +27,21 @@ def get_concert_description(url):
     """
     print(url)
     r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'lxml')
-    article = soup.find('article')
-    return article.text.strip()
+    soup = BeautifulSoup(r.content, 'html.parser')
+    div = soup.find('div', class_='region-content')
+    text = div.get_text('\n').strip()
+    # Clean up whitespace
+    text = re.sub(r'\n+', '\n', text)
+    return text
 
 def main():
     print('Getting concerts for filharmonia.sk ...')
-    concert_data = get_concert_data()
+    concert_data = get_concerts()
     print(f'Found {len(concert_data)} concerts')
         
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'venue'])   
+    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'time_to', 'url'])
     df['description'] = df['url'].apply(get_concert_description)
+    df.insert(0, 'venue', 'Slovenská filharmónia')
     df.insert(0, 'city', 'Bratislava')
     df.insert(0, 'source_url', 'http://www.filharmonia.sk')
     df.insert(0, 'source', 'Slovenská filharmónia')
