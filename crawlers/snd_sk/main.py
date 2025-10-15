@@ -1,7 +1,7 @@
 import time
 import datetime
-
 import requests
+import urllib3
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -43,7 +43,7 @@ def get_concert_data(url: str):
     """
     Get concert data from snd.sk
     """
-    r = requests.get(url)
+    r = requests.get(url, verify=False)
     soup = BeautifulSoup(r.content, 'lxml')
     events = []
     divs = soup.find_all('div', class_='calendar-events')
@@ -56,13 +56,16 @@ def get_concert_data(url: str):
 
 def extract_description(url):
     print(url)
-    r = requests.get(url)
+    r = requests.get(url, verify=False)
     soup = BeautifulSoup(r.text, 'html.parser')
     description = soup.find('meta', attrs={'property': 'og:description'})
     return description.get('content').strip()
 
 
 def main():
+    # Disable the InsecureRequestWarning
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
     base_url = 'https://snd.sk/program/'
     current_season_year = datetime.datetime.now().year
     current_month = datetime.datetime.now().month
