@@ -57,7 +57,7 @@ def get_slug(df_out, title):
 
 def get_classical_concerts():
     url = 'https://tpskprodcdn.azureedge.net/Grid/Data?v=1&lang=SK'
-    r = requests.get(url)
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
     text = r.text
     ast = esprima.parse(text)
     
@@ -122,18 +122,22 @@ def main():
     for _, row in df.iterrows():
         url = f'https://www.ticketportal.sk/event/{row["slug"]}'
         print(f'Processing {url}')
-        r = requests.get(url)
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         soup = BeautifulSoup(r.text, 'html.parser')
         description = extract_description(soup)
         divs = soup.find_all('div', itemtype='http://schema.org/Event')
         for div in divs:
-            concert_info = {
-                **extract_concert_info(div),
-                'url': url,
-                'organizer_url': extract_organizator_url(soup),
-                'description': description,
-            }
-            concert_data.append(concert_info)
+            try:
+                concert_info = {
+                    **extract_concert_info(div),
+                    'url': url,
+                    'organizer_url': extract_organizator_url(soup),
+                    'description': description,
+                }
+                concert_data.append(concert_info)
+            except Exception as e:
+                print(f'Error processing div in {url}: {div}')
+                print(e)
     
     df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue', 'city', 'url', 'organizer_url', 'description'])
     df.insert(0, 'source_url', 'https://www.ticketportal.sk')
