@@ -34,8 +34,10 @@ def extract_concerts(soup):
         title = ol.next_sibling
         composers = title.next_sibling.text.split('–')
         composers = [c.strip() for c in composers]
+
+        title = f'musica_litera: {title.text.strip()}'
         concerts.append({
-            'title': title.text.strip(),
+            'title': title,
             'date': f'{year}-{month:02d}-{day}',
             'url': ol.find_next('a')['href'],
             'time_from': time_from,
