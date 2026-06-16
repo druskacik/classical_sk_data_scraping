@@ -2,9 +2,7 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-import pandas as pd
-
-from ..classical import upload_potential_concerts
+from ..base import BaseCrawler, CrawlerConfig
 from ..extractors import extract_date, extract_time
 from ..formaters import format_date
 
@@ -70,27 +68,28 @@ def extract_event_info(url):
 
 
 
+class PkoPresovCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='pkopresov_sk',
+        source='Park kultúry a oddychu',
+        source_url='https://podujatia.pkopresov.sk/',
+        columns=['title', 'date', 'url', 'time_from', 'venue', 'city', 'description'],
+        upload_target='potential',
+        dedupe_subset=['title', 'date', 'url'],
+        front_fields=[
+            ('source_url', 'https://podujatia.pkopresov.sk/'),
+            ('source', 'Park kultúry a oddychu'),
+        ],
+    )
+
+    def scrape(self):
+        event_urls = crawl_event_urls()
+        return [extract_event_info(url) for url in event_urls]
+
+
 def main():
-    event_urls = crawl_event_urls()
-    event_data = [extract_event_info(url) for url in event_urls]
+    PkoPresovCrawler().run()
 
-    df = pd.DataFrame(event_data, columns=['title', 'date', 'url', 'time_from', 'venue', 'city', 'description'])
-    df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
-    
-    df.insert(0, 'source_url', 'https://podujatia.pkopresov.sk/')
-    df.insert(0, 'source', 'Park kultúry a oddychu')
-    
-    save_path = 'data/pkopresov_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
-
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_potential_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
 
 if __name__ == '__main__':
     main()

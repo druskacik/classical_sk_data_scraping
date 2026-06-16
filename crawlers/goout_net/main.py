@@ -1,9 +1,7 @@
 import requests
 from datetime import datetime
 
-import pandas as pd
-
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 def validate_schedule(schedule):
     """
@@ -61,33 +59,29 @@ def extract_concert_data(response):
     
     return concert_data
 
-def main():
-    print('Getting concerts for goout.net ...')
-    url = 'https://goout.net/services/entities/v1/schedules?languages%5B%5D=sk&categories%5B%5D=concerts&tags%5B%5D=classical&grouped=true&notScheduleTags%5B%5D=online&sort=popularity%3Adesc&limit=24&countryIsos%5B%5D=sk&include=events%2Cvenues%2Cimages%2Csales%2Ccities%2Cparents%2Cperformers'
-    
-    r = requests.get(url)
-    response = r.json()
-    concert_data = extract_concert_data(response)
-    
-    print(f'Found {len(concert_data)} concerts')
-        
-    df = pd.DataFrame(concert_data, columns=['title', 'venue', 'city', 'date', 'time_from', 'time_to', 'url', 'description'])
-    df.insert(0, 'source_url', 'https://goout.net')
-    df.insert(0, 'source', 'GoOut')
-    
-    df.drop_duplicates(subset=['title', 'date', 'time_from'], inplace=True)
-    
-    save_path = 'data/goout_net.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class GooutCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='goout_net',
+        source='GoOut',
+        source_url='https://goout.net',
+        columns=['title', 'venue', 'city', 'date', 'time_from', 'time_to', 'url', 'description'],
+        dedupe_subset=['title', 'date', 'time_from'],
+        front_fields=[
+            ('source_url', 'https://goout.net'),
+            ('source', 'GoOut'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
+    def scrape(self):
+        url = 'https://goout.net/services/entities/v1/schedules?languages%5B%5D=sk&categories%5B%5D=concerts&tags%5B%5D=classical&grouped=true&notScheduleTags%5B%5D=online&sort=popularity%3Adesc&limit=24&countryIsos%5B%5D=sk&include=events%2Cvenues%2Cimages%2Csales%2Ccities%2Cparents%2Cperformers'
+        r = requests.get(url)
+        response = r.json()
+        return extract_concert_data(response)
+
+
+def main():
+    GooutCrawler().run()
+
+
 if __name__ == '__main__':
     main()

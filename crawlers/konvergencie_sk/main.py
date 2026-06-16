@@ -3,10 +3,9 @@ import datetime
 
 import requests
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 from ..extractors import extract_date, extract_time
 
 def convert_date(date_str):
@@ -50,38 +49,34 @@ def extract_concert_info(concert):
         'description': description,
 	}
     
+class KonvergencieCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='konvergencie_sk',
+        source='Konvergencie',
+        source_url='https://www.konvergencie.sk',
+        columns=['title', 'date', 'url', 'time_from', 'time_to', 'venue', 'description'],
+        front_fields=[
+            ('city', 'Bratislava'),
+            ('source_url', 'https://www.konvergencie.sk'),
+            ('source', 'Konvergencie'),
+        ],
+    )
+
+    def scrape(self):
+        url = 'https://www.konvergencie.sk/vstupenky/'
+        r = requests.get(url)
+        soup = BeautifulSoup(r.content, 'html.parser')
+
+        concerts = soup.find_all('div', class_='tt-evt-li')
+        concert_data = [extract_concert_info(concert) for concert in concerts]
+        return [c for c in concert_data if validate_concert(c)]
+
+
 def main():
-    print('Getting concerts for konvergencie.sk ...')
-    url = 'https://www.konvergencie.sk/vstupenky/'
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
+    KonvergencieCrawler().run()
 
-    concerts = soup.find_all('div', class_='tt-evt-li')
-    concert_data = []
-    for concert in concerts:
-        concert_data.append(extract_concert_info(concert))
-
-    concert_data = [c for c in concert_data if validate_concert(c)]
-    
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'time_to', 'venue', 'description'])
-    df.insert(0, 'city', 'Bratislava')
-    df.insert(0, 'source_url', 'https://www.konvergencie.sk')
-    df.insert(0, 'source', 'Konvergencie')
-
-    save_path = 'data/konvergencie_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
-
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
 
 if __name__ == '__main__':
     main()
-
 
 

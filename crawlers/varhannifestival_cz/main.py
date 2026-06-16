@@ -2,11 +2,10 @@ import re
 from html import unescape
 from urllib.parse import urljoin
 
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 
 BASE_URL = 'https://www.varhannifestival.cz'
@@ -142,13 +141,11 @@ def get_concerts():
     return extract_concerts(soup)
 
 
-def main():
-    print('Getting concerts for varhannifestival.cz ...')
-    concert_data = get_concerts()
-    print(f'Found {len(concert_data)} concerts')
-
-    df = pd.DataFrame(
-        concert_data,
+class VarhanniFestivalCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='varhannifestival_cz',
+        source=SOURCE_NAME,
+        source_url=SOURCE_URL,
         columns=[
             'title',
             'date',
@@ -160,21 +157,19 @@ def main():
             'description',
             'type',
         ],
+        dedupe_subset=['title', 'date', 'url'],
+        front_fields=[
+            ('source_url', SOURCE_URL),
+            ('source', SOURCE_NAME),
+        ],
     )
-    df.insert(0, 'source_url', SOURCE_URL)
-    df.insert(0, 'source', SOURCE_NAME)
-    df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
 
-    save_path = 'data/varhannifestival_cz.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
+    def scrape(self):
+        return get_concerts()
 
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
+def main():
+    VarhanniFestivalCrawler().run()
 
 
 if __name__ == '__main__':

@@ -4,7 +4,11 @@ import requests
 
 import pandas as pd
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
+
+ALREADY_PARSED_ORGANIZERS = [
+    'https://www.ticketportal.sk/NEvent/SLOVENSKA_FILHARMONIA'
+]
 
 def extract_variable(ast, name):
     for node in ast.body:
@@ -110,54 +114,53 @@ def extract_description(soup):
     return None
 
 
-def main():
-    
-    ALREADY_PARSED_ORGANIZERS = [
-        'https://www.ticketportal.sk/NEvent/SLOVENSKA_FILHARMONIA'
-    ]
-    
-    df = get_classical_concerts()
-    
-    concert_data = []
-    for _, row in df.iterrows():
-        url = f'https://www.ticketportal.sk/event/{row["slug"]}'
-        print(f'Processing {url}')
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-        soup = BeautifulSoup(r.text, 'html.parser')
-        description = extract_description(soup)
-        divs = soup.find_all('div', itemtype='http://schema.org/Event')
-        for div in divs:
-            try:
-                concert_info = {
-                    **extract_concert_info(div),
-                    'url': url,
-                    'organizer_url': extract_organizator_url(soup),
-                    'description': description,
-                }
-                concert_data.append(concert_info)
-            except Exception as e:
-                print(f'Error processing div in {url}: {div}')
-                print(e)
-    
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue', 'city', 'url', 'organizer_url', 'description'])
-    df.insert(0, 'source_url', 'https://www.ticketportal.sk')
-    df.insert(0, 'source', 'Ticketportal.sk')
-    df = df[~df['organizer_url'].isin(ALREADY_PARSED_ORGANIZERS)]
-    df.drop_duplicates(subset=['title', 'date', 'time_from', 'venue', 'city', 'url'], inplace=True)
-    
-    save_path = 'data/ticketportal_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class TicketportalCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='ticketportal_sk',
+        source='Ticketportal.sk',
+        source_url='https://www.ticketportal.sk',
+        columns=['title', 'date', 'time_from', 'venue', 'city', 'url', 'organizer_url', 'description'],
+        front_fields=[
+            ('source_url', 'https://www.ticketportal.sk'),
+            ('source', 'Ticketportal.sk'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
+    def scrape(self):
+        df = get_classical_concerts()
+
+        concert_data = []
+        for _, row in df.iterrows():
+            url = f'https://www.ticketportal.sk/event/{row["slug"]}'
+            print(f'Processing {url}')
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            soup = BeautifulSoup(r.text, 'html.parser')
+            description = extract_description(soup)
+            divs = soup.find_all('div', itemtype='http://schema.org/Event')
+            for div in divs:
+                try:
+                    concert_info = {
+                        **extract_concert_info(div),
+                        'url': url,
+                        'organizer_url': extract_organizator_url(soup),
+                        'description': description,
+                    }
+                    concert_data.append(concert_info)
+                except Exception as e:
+                    print(f'Error processing div in {url}: {div}')
+                    print(e)
+
+        return concert_data
+
+    def transform(self, df):
+        df = df[~df['organizer_url'].isin(ALREADY_PARSED_ORGANIZERS)]
+        df.drop_duplicates(subset=['title', 'date', 'time_from', 'venue', 'city', 'url'], inplace=True)
+        return df
+
+
+def main():
+    TicketportalCrawler().run()
 
 if __name__ == '__main__':
     main()
-
 

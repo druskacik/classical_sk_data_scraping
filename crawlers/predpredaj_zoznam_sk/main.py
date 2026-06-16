@@ -1,9 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 
-import pandas as pd
-
-from ..classical import upload_potential_concerts
+from ..base import BaseCrawler, CrawlerConfig
 from ..extractors import clean_string
 
 import json
@@ -79,38 +77,41 @@ def extract_concert_performances(concert_url):
     }]
 
 
+class PredpredajCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='predpredaj_zoznam_sk',
+        source='Zoznam.sk',
+        source_url='https://predpredaj.zoznam.sk/',
+        columns=['title', 'date', 'url', 'time_from', 'venue', 'city', 'description'],
+        upload_target='potential',
+        front_fields=[
+            ('source_url', 'https://predpredaj.zoznam.sk/'),
+            ('source', 'Zoznam.sk'),
+        ],
+    )
+
+    def scrape(self):
+        url = 'https://predpredaj.zoznam.sk/sk/kategoria/koncert/'
+        r = requests.get(url)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        concerts = soup.find_all('article')
+
+        def extract_concert_url(concert):
+            return f'https://predpredaj.zoznam.sk{concert.find("a")["href"]}'
+
+        concert_urls = [extract_concert_url(c) for c in concerts if 'darcekove-poukazy' not in extract_concert_url(c)]
+
+        concert_data = [extract_concert_performances(url) for url in concert_urls]
+        return [item for sublist in concert_data for item in sublist]
+
+    def transform(self, df):
+        df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
+        return df[df['city'].notna()].copy()
+
+
 def main():
-    url = 'https://predpredaj.zoznam.sk/sk/kategoria/koncert/'
-    r = requests.get(url)
-    soup = BeautifulSoup(r.text, 'html.parser')
-    concerts = soup.find_all('article')
-    
-    def extract_concert_url(concert):
-        return f'https://predpredaj.zoznam.sk{concert.find("a")["href"]}'
+    PredpredajCrawler().run()
 
-    concert_urls = [extract_concert_url(c) for c in concerts if 'darcekove-poukazy' not in extract_concert_url(c)]
-    
-    concert_data = [extract_concert_performances(url) for url in concert_urls]
-    concert_data = [item for sublist in concert_data for item in sublist]
-
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'venue', 'city', 'description'])
-    df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
-    df = df[df['city'].notna()].copy()
-    
-    df.insert(0, 'source_url', 'https://predpredaj.zoznam.sk/')
-    df.insert(0, 'source', 'Zoznam.sk')
-    
-    save_path = 'data/predpredaj_zoznam_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
-
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_potential_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
 
 if __name__ == '__main__':
     main()

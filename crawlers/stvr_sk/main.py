@@ -1,9 +1,11 @@
 import requests
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
+
+URL = 'https://devin.stvr.sk/clanky/koncerty-live/388941/cyklus-organovych-koncertov-pod-pyramidou-januar-jun-2025'
+BASE_NAME = 'Cyklus Organových koncertov pod pyramídou'
 
 MONTHS_MAP = {
     'január': '01',
@@ -70,40 +72,36 @@ def extract_concerts(soup):
     return data
 
 
-def main():
-    print('Getting concerts for devin.stvr.sk ...')
-    url = 'https://devin.stvr.sk/clanky/koncerty-live/388941/cyklus-organovych-koncertov-pod-pyramidou-januar-jun-2025'
-    
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
-    
-    concert_data = extract_concerts(soup)
-    base_name = 'Cyklus Organových koncertov pod pyramídou'
-    
-    df = pd.DataFrame(concert_data, columns=['date', 'interpreter', 'composers'])
-    df['title'] = df['interpreter'].apply(lambda x: f'{base_name} - {x}')
-    df['date'] = df['date'].apply(format_date)
-    
-    df.insert(0, 'time_from', '10:30')
-    df.insert(0, 'venue', 'Veľké koncertné štúdio Slovenského rozhlasu')
-    df.insert(0, 'city', 'Bratislava')
-    df.insert(0, 'url', url)
-    df.insert(0, 'source_url', 'https://devin.stvr.sk')
-    df.insert(0, 'source', 'STVR')
-    
-    print(f'Found {len(concert_data)} concerts')
-    
-    save_path = 'data/stvr_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class StvrCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='stvr_sk',
+        source='STVR',
+        source_url='https://devin.stvr.sk',
+        columns=['date', 'interpreter', 'composers'],
+        front_fields=[
+            ('time_from', '10:30'),
+            ('venue', 'Veľké koncertné štúdio Slovenského rozhlasu'),
+            ('city', 'Bratislava'),
+            ('url', URL),
+            ('source_url', 'https://devin.stvr.sk'),
+            ('source', 'STVR'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
+    def scrape(self):
+        r = requests.get(URL)
+        soup = BeautifulSoup(r.content, 'html.parser')
+        return extract_concerts(soup)
+
+    def transform(self, df):
+        df['title'] = df['interpreter'].apply(lambda x: f'{BASE_NAME} - {x}')
+        df['date'] = df['date'].apply(format_date)
+        return df
+
+
+def main():
+    StvrCrawler().run()
+
+
 if __name__ == '__main__':
     main()

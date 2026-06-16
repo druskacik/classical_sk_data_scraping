@@ -1,9 +1,10 @@
 import requests
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
+
+URL = 'https://kultura.trnava.sk/podujatie/trnavska-hudobna-jar-2025'
 
 def extract_event_info(event):
     tag = event.find('span', class_='tag').find('a')
@@ -26,34 +27,31 @@ def extract_event_info(event):
 	}
 
 
-def main():
-    print('Getting concerts for kultura.trnava.sk ...')
-    url = 'https://kultura.trnava.sk/podujatie/trnavska-hudobna-jar-2025'
-    
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
-    
-    concert_divs = soup.find_all('div', class_='event')
-    concert_data = [extract_event_info(div) for div in concert_divs]
-    print(f'Found {len(concert_data)} concerts')
-        
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'venue', 'description'])
-    df.insert(0, 'city', 'Trnava')
-    df.insert(0, 'url', url)
-    df.insert(0, 'source_url', 'https://kultura.trnava.sk')
-    df.insert(0, 'source', 'Zaži v Trnave')
-    
-    save_path = 'data/kultura_trnava_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class KulturaTrnavaCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='kultura_trnava_sk',
+        source='Zaži v Trnave',
+        source_url='https://kultura.trnava.sk',
+        columns=['title', 'date', 'time_from', 'venue', 'description'],
+        front_fields=[
+            ('city', 'Trnava'),
+            ('url', URL),
+            ('source_url', 'https://kultura.trnava.sk'),
+            ('source', 'Zaži v Trnave'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
+    def scrape(self):
+        r = requests.get(URL)
+        soup = BeautifulSoup(r.content, 'html.parser')
+
+        concert_divs = soup.find_all('div', class_='event')
+        return [extract_event_info(div) for div in concert_divs]
+
+
+def main():
+    KulturaTrnavaCrawler().run()
+
+
 if __name__ == '__main__':
     main()

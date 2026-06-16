@@ -2,10 +2,9 @@ import re
 from datetime import datetime
 import requests
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 def get_concerts():
     today = str(datetime.today()).split()[0]
@@ -34,31 +33,32 @@ def get_concert_description(url):
     text = re.sub(r'\n+', '\n', text)
     return text
 
-def main():
-    print('Getting concerts for filharmonia.sk ...')
-    concert_data = get_concerts()
-    print(f'Found {len(concert_data)} concerts')
-        
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'time_from', 'time_to', 'url'])
-    df['description'] = df['url'].apply(get_concert_description)
-    df.insert(0, 'venue', 'Slovenská filharmónia')
-    df.insert(0, 'city', 'Bratislava')
-    df.insert(0, 'source_url', 'http://www.filharmonia.sk')
-    df.insert(0, 'source', 'Slovenská filharmónia')
-    
-    save_path = 'data/filharmonia_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class FilharmoniaCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='filharmonia_sk',
+        source='Slovenská filharmónia',
+        source_url='http://www.filharmonia.sk',
+        columns=['title', 'date', 'time_from', 'time_to', 'url'],
+        front_fields=[
+            ('venue', 'Slovenská filharmónia'),
+            ('city', 'Bratislava'),
+            ('source_url', 'http://www.filharmonia.sk'),
+            ('source', 'Slovenská filharmónia'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
+    def scrape(self):
+        return get_concerts()
+
+    def transform(self, df):
+        df['description'] = df['url'].apply(get_concert_description)
+        return df
+
+
+def main():
+    FilharmoniaCrawler().run()
+
+
 if __name__ == '__main__':
     main()
-
 

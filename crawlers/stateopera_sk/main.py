@@ -1,9 +1,8 @@
 import requests
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 from ..formaters import clean_string
 
 MONTH_TO_NUMBER = {
@@ -51,36 +50,36 @@ def extract_description(url):
     description = clean_string(description)
     return description
 
-def main():
-    print('Getting concerts for stateopera.sk ...')
-    url = 'https://www.stateopera.sk/sk/program?filter=0'
-    
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
-    
-    concert_divs = soup.find_all('div', attrs={'data-filter': True})
-    concert_data = [extract_concert_info(div) for div in concert_divs]
-    
-    print(f'Found {len(concert_data)} concerts')
-        
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'type'])
-    df['description'] = df['url'].apply(extract_description)
-    df.insert(0, 'venue', None)
-    df.insert(0, 'city', 'Banská Bystrica')
-    df.insert(0, 'source_url', 'https://www.stateopera.sk')
-    df.insert(0, 'source', 'Štátna opera')
-    
-    save_path = 'data/stateopera_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class StateOperaCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='stateopera_sk',
+        source='Štátna opera',
+        source_url='https://www.stateopera.sk',
+        columns=['title', 'date', 'url', 'time_from', 'type'],
+        front_fields=[
+            ('venue', None),
+            ('city', 'Banská Bystrica'),
+            ('source_url', 'https://www.stateopera.sk'),
+            ('source', 'Štátna opera'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
+    def scrape(self):
+        url = 'https://www.stateopera.sk/sk/program?filter=0'
+        r = requests.get(url)
+        soup = BeautifulSoup(r.content, 'html.parser')
+
+        concert_divs = soup.find_all('div', attrs={'data-filter': True})
+        return [extract_concert_info(div) for div in concert_divs]
+
+    def transform(self, df):
+        df['description'] = df['url'].apply(extract_description)
+        return df
+
+
+def main():
+    StateOperaCrawler().run()
+
+
 if __name__ == '__main__':
     main()

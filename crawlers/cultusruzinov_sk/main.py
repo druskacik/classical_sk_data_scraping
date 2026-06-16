@@ -1,9 +1,7 @@
 import random
 import requests
 
-import pandas as pd
-
-from ..classical import upload_potential_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 def get_access_token():
     url = 'https://www.cultusruzinov.sk/_api/v1/access-tokens'
@@ -43,39 +41,41 @@ def get_event_data(slug, access_token):
 		'time_to': time_to,
 	}
 
-def main():
-    print('Getting concerts for cultusruzinov.sk ...')
-    access_token = get_access_token()
-    
-    n_attempts = 0
-    max_attempts = 3
-    while n_attempts < max_attempts:
-        try:
-            slugs = get_event_slugs(access_token)
-            print(f'Found {len(slugs)} concerts. Fetching data ...')
-            concert_data = [get_event_data(slug, access_token) for slug in slugs]
-            break
-        except Exception as e:
-            print(f'Error: {e}')
-            n_attempts += 1
-            if n_attempts == max_attempts:
-                raise e
-        
-    df = pd.DataFrame(concert_data, columns=['title', 'description', 'url', 'venue', 'city', 'date', 'time_from', 'time_to'])
-    df.insert(0, 'source_url', 'https://www.cultusruzinov.sk')
-    df.insert(0, 'source', 'Dom kultúry Ružinov')
-    
-    save_path = 'data/cultusruzinov_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class CultusRuzinovCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='cultusruzinov_sk',
+        source='Dom kultúry Ružinov',
+        source_url='https://www.cultusruzinov.sk',
+        columns=['title', 'description', 'url', 'venue', 'city', 'date', 'time_from', 'time_to'],
+        upload_target='potential',
+        front_fields=[
+            ('source_url', 'https://www.cultusruzinov.sk'),
+            ('source', 'Dom kultúry Ružinov'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_potential_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
+    def scrape(self):
+        access_token = get_access_token()
+
+        n_attempts = 0
+        max_attempts = 3
+        while n_attempts < max_attempts:
+            try:
+                slugs = get_event_slugs(access_token)
+                print(f'Found {len(slugs)} concerts. Fetching data ...')
+                return [get_event_data(slug, access_token) for slug in slugs]
+            except Exception as e:
+                print(f'Error: {e}')
+                n_attempts += 1
+                if n_attempts == max_attempts:
+                    raise e
+
+        return []
+
+
+def main():
+    CultusRuzinovCrawler().run()
+
+
 if __name__ == '__main__':
     main()

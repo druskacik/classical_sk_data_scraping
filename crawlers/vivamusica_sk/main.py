@@ -1,10 +1,9 @@
 import requests
 from datetime import datetime
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 def convert_date(date_str):
     """
@@ -55,34 +54,33 @@ def extract_concert_info(url):
         'description': description
 	}
     
+class VivaMusicaCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='vivamusica_sk',
+        source='Viva Musica!',
+        source_url='https://www.vivamusica.sk',
+        columns=['title', 'date', 'url', 'time_from', 'venue', 'description'],
+        front_fields=[
+            ('city', 'Bratislava'),
+            ('source_url', 'https://www.vivamusica.sk'),
+            ('source', 'Viva Musica!'),
+        ],
+    )
+
+    def scrape(self):
+        url = 'https://www.vivamusica.sk'
+        r = requests.get(url)
+        soup = BeautifulSoup(r.content, 'html.parser')
+
+        concert_links = find_concert_links(soup)
+        return [extract_concert_info(link) for link in concert_links]
+
+
 def main():
-    print('Getting concerts for vivamusica.sk ...')
-    url = 'https://www.vivamusica.sk'
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
+    VivaMusicaCrawler().run()
 
-    concert_links = find_concert_links(soup)
-    concert_data = [extract_concert_info(link) for link in concert_links]
-
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'venue', 'description'])
-    df.insert(0, 'city', 'Bratislava')
-    df.insert(0, 'source_url', 'https://www.vivamusica.sk')
-    df.insert(0, 'source', 'Viva Musica!')
-
-    save_path = 'data/vivamusica_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
-
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
 
 if __name__ == '__main__':
     main()
-
 
 

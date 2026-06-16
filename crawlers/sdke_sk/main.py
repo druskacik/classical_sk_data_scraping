@@ -2,9 +2,7 @@ from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 
-import pandas as pd
-
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 def extract_data_ids():
     current_month = datetime.now().strftime('%Y%m')
@@ -85,51 +83,55 @@ def extract_description(url):
     description = soup.find('div', class_='field--name-field-play-description').get_text().strip()
     return description
 
+class SdkeCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='sdke_sk',
+        source='Národné divadlo Košice',
+        source_url='https://www.sdke.sk',
+        columns=['title', 'date', 'url', 'time_from', 'type', 'description'],
+        front_fields=[
+            ('city', 'Košice'),
+            ('venue', 'Národné divadlo Košice'),
+            ('source_url', 'https://www.sdke.sk'),
+            ('source', 'Národné divadlo Košice'),
+        ],
+    )
+
+    def scrape(self):
+        data_ids = extract_data_ids()
+        concert_data = []
+
+        for data_id in data_ids:
+            concert = extract_concert_data(data_id)
+            for i, obj in enumerate(concert):
+                path = obj['path']
+                if not path.startswith('/sk/balet') and not path.startswith('/sk/opera'):
+                    continue
+                url = f"https://www.sdke.sk{path}"
+                date = obj['dates'].split('|')[i]
+                date_obj, time_part = extract_date_and_time(date)
+                description = extract_description(url)
+                concert_data.append({
+                    **obj,
+                    'url': url,
+                    'date': date_obj.strftime('%Y/%m/%d'),
+                    'time_from': time_part,
+                    'link': obj['links'].split('|')[i],
+                    'type': extract_type(obj['path']),
+                    'description': description
+                })
+
+        return concert_data
+
+    def transform(self, df):
+        df = df[df['type'].isin(['Balet', 'Opera'])].reset_index(drop=True)
+        df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
+        return df
+
+
 def main():
-    data_ids = extract_data_ids()
-    concert_data = []
+    SdkeCrawler().run()
 
-    for data_id in data_ids:
-        concert = extract_concert_data(data_id)
-        for i, obj in enumerate(concert):
-            path = obj['path']
-            if not path.startswith('/sk/balet') and not path.startswith('/sk/opera'):
-                continue
-            url = f"https://www.sdke.sk{path}"
-            date = obj['dates'].split('|')[i]
-            date_obj, time_part = extract_date_and_time(date)
-            description = extract_description(url)
-            concert_data.append({
-                **obj,
-                'url': url,
-                'date': date_obj.strftime('%Y/%m/%d'),
-                'time_from': time_part,
-                'link': obj['links'].split('|')[i],
-                'type': extract_type(obj['path']),
-                'description': description
-            })
-
-        
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'type', 'description'])
-    df = df[df['type'].isin(['Balet', 'Opera'])].reset_index(drop=True)
-    df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
-    
-    df.insert(0, 'city', 'Košice')
-    df.insert(0, 'venue', 'Národné divadlo Košice')
-    df.insert(0, 'source_url', 'https://www.sdke.sk')
-    df.insert(0, 'source', 'Národné divadlo Košice')
-    
-    save_path = 'data/sdke_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
-
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
 
 if __name__ == '__main__':
     main()

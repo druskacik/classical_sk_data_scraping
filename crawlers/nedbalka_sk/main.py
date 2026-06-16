@@ -1,8 +1,7 @@
 import requests
-import pandas as pd
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 MONTH_TO_NUMBER = {
     'január': 1,
@@ -45,36 +44,30 @@ def extract_concerts(soup):
         })
     return concerts
 
+class NedbalkaCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='nedbalka_sk',
+        source='Galéria Nedbalka',
+        source_url='https://nedbalka.sk',
+        columns=['title', 'date', 'url', 'time_from', 'composers'],
+        front_fields=[
+            ('venue', 'Galéria Nedbalka'),
+            ('city', 'Bratislava'),
+            ('source_url', 'https://nedbalka.sk'),
+            ('source', 'Galéria Nedbalka'),
+        ],
+    )
+
+    def scrape(self):
+        url = 'https://www.nedbalka.sk/aktuality/koncerty-musica_litera/'
+        r = requests.get(url)
+        soup = BeautifulSoup(r.content, 'html.parser')
+        return extract_concerts(soup)
+
+
 def main():
-    print('Getting concerts for nedbalka.sk ...')
-    url = 'https://www.nedbalka.sk/aktuality/koncerty-musica_litera/'
-    
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
-    
-    concert_data = extract_concerts(soup)
+    return NedbalkaCrawler().run()
 
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'composers'])
-    df.insert(0, 'venue', 'Galéria Nedbalka')
-    df.insert(0, 'city', 'Bratislava')
-    df.insert(0, 'source_url', 'https://nedbalka.sk')
-    df.insert(0, 'source', 'Galéria Nedbalka')
-
-    print(f'Found {len(concert_data)} concerts')
-    
-    save_path = 'data/nedbalka_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
-
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
-    return concert_data
 
 if __name__ == '__main__':
     main()

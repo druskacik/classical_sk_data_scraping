@@ -1,10 +1,9 @@
 import re
 import requests
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 from ..extractors import extract_date, extract_time
 from ..formaters import format_date
 
@@ -67,36 +66,38 @@ def extract_composers(url):
     composers = [clean_composer_name(h.text.strip()) for h in hs]
     return list(set(composers))
 
-def main():
-    print('Getting concerts for kpvh.sk ...')
-    url = 'https://www.kpvh.sk/sezona-2025-2026/'
-    
-    r = requests.get(url)
-    soup = BeautifulSoup(r.content, 'html.parser')
-    
-    concert_divs = soup.find_all('div', class_='mt-i cf')
-    concert_data = [extract_concert_info(div) for div in concert_divs]
-    
-    print(f'Found {len(concert_data)} concerts')
-        
-    df = pd.DataFrame(concert_data, columns=['title', 'date', 'url', 'time_from', 'venue'])
-    df.drop_duplicates(subset=['title', 'date', 'url'], inplace=True)
-    df['composers'] = df['url'].apply(extract_composers)
-    df.insert(0, 'city', 'Trenčín')
-    df.insert(0, 'source_url', 'https://www.kpvh.sk')
-    df.insert(0, 'source', 'Klub priateľov vážnej hudby')
-    
-    save_path = 'data/kpvh_sk.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class KpvhCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='kpvh_sk',
+        source='Klub priateľov vážnej hudby',
+        source_url='https://www.kpvh.sk',
+        columns=['title', 'date', 'url', 'time_from', 'venue'],
+        dedupe_subset=['title', 'date', 'url'],
+        front_fields=[
+            ('city', 'Trenčín'),
+            ('source_url', 'https://www.kpvh.sk'),
+            ('source', 'Klub priateľov vážnej hudby'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
+    def scrape(self):
+        url = 'https://www.kpvh.sk/sezona-2025-2026/'
+        r = requests.get(url)
+        soup = BeautifulSoup(r.content, 'html.parser')
+
+        concert_divs = soup.find_all('div', class_='mt-i cf')
+        return [extract_concert_info(div) for div in concert_divs]
+
+    def transform(self, df):
+        if self.config.dedupe_subset:
+            df.drop_duplicates(subset=self.config.dedupe_subset, inplace=True)
+        df['composers'] = df['url'].apply(extract_composers)
+        return df
+
+
+def main():
+    KpvhCrawler().run()
+
+
 if __name__ == '__main__':
     main()

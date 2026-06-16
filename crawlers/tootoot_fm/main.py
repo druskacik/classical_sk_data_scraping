@@ -1,8 +1,6 @@
 import requests
 
-import pandas as pd
-
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 def validate_concert(concert):
     if concert['Event']['IsSeasonTicketEvent']:
@@ -22,34 +20,30 @@ def extract_concert_info(concert):
 		'description': event['About']
     }
 
-def main():
-    print('Getting concerts for tootoot.fm ...')
-    url = 'https://api.tootoot.co/api/event/search?categories=548057368d4031089cea31f6&cityId=&page=0&perPage=99'
-    
-    r = requests.get(url)
-    concerts = r.json()
-    concerts = [c for c in concerts if validate_concert(c)]
-    concert_data = [extract_concert_info(concert) for concert in concerts]
-    
-    print(f'Found {len(concert_data)} concerts')
-        
-    df = pd.DataFrame(concert_data, columns=['title', 'venue', 'city', 'time_from', 'time_to', 'date', 'url', 'description'])
-    df.insert(0, 'source_url', 'https://tootoot.fm')
-    df.insert(0, 'source', 'tootoot')
-    
-    df.drop_duplicates(subset=['title', 'date', 'time_from'], inplace=True)
-    
-    save_path = 'data/tootoot_fm.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    
-    # Convert DataFrame to list of dictionaries for API upload
-    concert_data = df.to_dict(orient='records')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+class TootootCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='tootoot_fm',
+        source='tootoot',
+        source_url='https://tootoot.fm',
+        columns=['title', 'venue', 'city', 'time_from', 'time_to', 'date', 'url', 'description'],
+        dedupe_subset=['title', 'date', 'time_from'],
+        front_fields=[
+            ('source_url', 'https://tootoot.fm'),
+            ('source', 'tootoot'),
+        ],
+    )
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(concert_data)
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
-    
+    def scrape(self):
+        url = 'https://api.tootoot.co/api/event/search?categories=548057368d4031089cea31f6&cityId=&page=0&perPage=99'
+        r = requests.get(url)
+        concerts = r.json()
+        concerts = [c for c in concerts if validate_concert(c)]
+        return [extract_concert_info(concert) for concert in concerts]
+
+
+def main():
+    TootootCrawler().run()
+
+
 if __name__ == '__main__':
     main()

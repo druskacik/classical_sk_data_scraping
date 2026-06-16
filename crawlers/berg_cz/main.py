@@ -3,11 +3,10 @@ from datetime import datetime
 from html import unescape
 from urllib.parse import urljoin
 
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-from ..classical import upload_concerts
+from ..base import BaseCrawler, CrawlerConfig
 
 
 BASE_URL = 'https://berg.cz/'
@@ -179,19 +178,11 @@ def validate_concert(concert):
     return True
 
 
-def main():
-    print('Getting concerts for berg.cz ...')
-    session = requests.Session()
-    concert_links = find_concert_links(session)
-    concert_data = []
-
-    for link in concert_links:
-        concert = extract_concert_info(session, link)
-        if concert and validate_concert(concert):
-            concert_data.append(concert)
-
-    df = pd.DataFrame(
-        concert_data,
+class BergCrawler(BaseCrawler):
+    config = CrawlerConfig(
+        slug='berg_cz',
+        source=SOURCE,
+        source_url=SOURCE_URL,
         columns=[
             'title',
             'date',
@@ -203,18 +194,27 @@ def main():
             'description',
             'type',
         ],
+        front_fields=[
+            ('source_url', SOURCE_URL),
+            ('source', SOURCE),
+        ],
     )
-    df.insert(0, 'source_url', SOURCE_URL)
-    df.insert(0, 'source', SOURCE)
 
-    save_path = 'data/berg_cz.csv'
-    df.to_csv(save_path, index=False)
-    print(f'Saved to {save_path}')
-    print(f'Prepared {len(concert_data)} concerts for upload')
+    def scrape(self):
+        session = requests.Session()
+        concert_links = find_concert_links(session)
+        concert_data = []
 
-    print('Uploading concerts to the API ...')
-    inserted_count, skipped_count = upload_concerts(df.to_dict(orient='records'))
-    print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
+        for link in concert_links:
+            concert = extract_concert_info(session, link)
+            if concert and validate_concert(concert):
+                concert_data.append(concert)
+
+        return concert_data
+
+
+def main():
+    BergCrawler().run()
 
 
 if __name__ == '__main__':
