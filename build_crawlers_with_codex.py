@@ -77,6 +77,17 @@ URLS = [
 MODEL = "gpt-5.5"
 PROMPT_PATH = Path("prompts/build_crawler.mustache")
 CRAWLERS_DIR = Path("crawlers")
+CZECH_DOMAINS = {".cz"}
+SLOVAK_DOMAINS = {".sk"}
+CZECH_HOSTS = {
+    "collegium1704.com",
+    "djkt.eu",
+    "dvorak-symphony-orchestra.com",
+    "ebcz.eu",
+    "konzervatorbrno.eu",
+    "pragueclassicalconcerts.com",
+    "pragueticketoffice.com",
+}
 
 
 def crawler_folder_name(url: str) -> str:
@@ -93,14 +104,28 @@ def crawler_folder_name(url: str) -> str:
     return folder
 
 
+def country_code_for_url(url: str) -> str:
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    host = (parsed.netloc or parsed.path.split("/", 1)[0]).lower()
+    if host.startswith("www."):
+        host = host[4:]
+    if host in CZECH_HOSTS:
+        return "CZ"
+    if any(host.endswith(domain) for domain in CZECH_DOMAINS):
+        return "CZ"
+    if any(host.endswith(domain) for domain in SLOVAK_DOMAINS):
+        return "SK"
+    raise ValueError(f"Could not infer country code from URL: {url!r}. Pass only country-specific domains or add a mapping.")
+
+
 def render_prompt(url: str) -> str:
     template = PROMPT_PATH.read_text(encoding="utf-8")
-    return pystache.render(template, {"url": url})
+    return pystache.render(template, {"url": url, "country_code": country_code_for_url(url)})
 
 
 def build_crawler(codex: Codex, url: str) -> str | None:
     folder_name = crawler_folder_name(url)
-    crawler_dir = CRAWLERS_DIR / folder_name
+    crawler_dir = CRAWLERS_DIR / country_code_for_url(url).lower() / folder_name
 
     if crawler_dir.exists():
         print(f"SKIP {url} -> {crawler_dir} already exists")
@@ -153,7 +178,7 @@ def main() -> None:
 
     if args.dry_run:
         for url in urls:
-            crawler_dir = CRAWLERS_DIR / crawler_folder_name(url)
+            crawler_dir = CRAWLERS_DIR / country_code_for_url(url).lower() / crawler_folder_name(url)
             action = "SKIP" if crawler_dir.exists() else "BUILD"
             print(f"{action} {url} -> {crawler_dir}")
         return

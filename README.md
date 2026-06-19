@@ -1,5 +1,5 @@
 # Run crawlers
 
 ```
-uv run python -m crawlers.filharmonia_sk.main
+uv run python -m crawlers.sk.filharmonia_sk.main
 ```

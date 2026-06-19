@@ -10,12 +10,12 @@ For inspiration, see examples in @crawlers folder.
 To investigate the website, use the Playwright MCP. First, investigate if you can reconstruct some API from the network requests - that would be the easiest, since it usually has the structured data. If you can't find it in network requests, go for HTML parsing.
 
 Concert details should contain following values:
-title, date, url, time_from, venue, city, descriptio, source_url, source
+title, date, url, time_from, venue, city, country_code, description, source_url, source
 
 If some of the columns can't be extracted in a structured way, use None or a reasonable default (e.g. city can be often inferred from the website).
 
 What I mean by description: description is a long body of text related to the concert. It can be large and unstructured, and it's important that it includes details about which composers and works are being played (if this is on the website, of course). The reasoning behind this is that the description will be later parsed by AI to extract composers and works.
 
-Save the new crawler to a new folder, similar to the existing crawlers: example.com -> `crawlers/example_com/main.py`. After building, test it by running it and look at the output.
+Save the new crawler to a new folder, similar to the existing crawlers: example.cz -> `crawlers/cz/example_cz/main.py`. Set `CrawlerConfig.country_code` to `{{ country_code }}`. After building, test it by running it and look at the output.
 
 Build the crawler for the following url: {{ url }}

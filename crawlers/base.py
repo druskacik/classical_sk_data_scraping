@@ -14,11 +14,18 @@ class CrawlerConfig:
     slug: str
     source: str
     source_url: str
+    country_code: str = 'SK'
     columns: list[str] | None = None
     upload_target: UploadTarget = 'classical'
     dedupe_subset: list[str] | None = None
     front_fields: list[tuple[str, Any]] = field(default_factory=list)
     csv_path: str | None = None
+
+    def __post_init__(self):
+        country_code = self.country_code.upper()
+        if len(country_code) != 2:
+            raise ValueError(f'country_code must be an ISO 3166-1 alpha-2 code, got {self.country_code!r}')
+        object.__setattr__(self, 'country_code', country_code)
 
     @property
     def save_path(self) -> str:
@@ -52,6 +59,11 @@ class BaseCrawler:
 
         for column, value in self.config.front_fields:
             df.insert(0, column, value)
+
+        if 'country_code' not in df.columns:
+            df.insert(0, 'country_code', self.config.country_code)
+        else:
+            df['country_code'] = df['country_code'].apply(lambda value: value.upper() if isinstance(value, str) else value)
 
         if self.config.dedupe_subset:
             df.drop_duplicates(subset=self.config.dedupe_subset, inplace=True)

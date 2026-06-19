@@ -9,17 +9,15 @@ def discover_crawler_modules():
     crawler_modules = []
     crawlers_dir = Path(__file__).parent / 'crawlers'
     
-    # Walk through all subdirectories in crawlers/
-    for crawler_dir in crawlers_dir.iterdir():
-        if crawler_dir.is_dir() and not crawler_dir.name.startswith('__'):
-            # Import the main module from each crawler
-            module_path = f"crawlers.{crawler_dir.name}.main"
-            try:
-                module = importlib.import_module(module_path)
-                if hasattr(module, 'main'):
-                    crawler_modules.append(module.main)
-            except ImportError as e:
-                print(f"Failed to import {module_path}: {e}")
+    for main_file in sorted(crawlers_dir.glob('*/*/main.py')):
+        parts = main_file.relative_to(crawlers_dir).with_suffix('').parts
+        module_path = 'crawlers.' + '.'.join(parts)
+        try:
+            module = importlib.import_module(module_path)
+            if hasattr(module, 'main'):
+                crawler_modules.append(module.main)
+        except ImportError as e:
+            print(f"Failed to import {module_path}: {e}")
     
     return crawler_modules
 

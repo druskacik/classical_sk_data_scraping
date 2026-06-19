@@ -37,8 +37,8 @@ def upload_concerts(data: list[dict], table_name: str = 'classical_concert'):
             composers = concert.get('composers')
             is_concert_details_filled = True if composers is not None else False
             cursor.execute(
-                f"INSERT INTO {table_name} (title, date, source, source_url, time_from, time_to, city, venue, url, type, description, composers, is_concert_details_filled) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                f"INSERT INTO {table_name} (title, date, source, source_url, time_from, time_to, city, country_code, venue, url, type, description, composers, is_concert_details_filled) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     concert['title'], 
                     concert['date'], 
@@ -47,6 +47,7 @@ def upload_concerts(data: list[dict], table_name: str = 'classical_concert'):
                     concert.get('time_from'),
                     concert.get('time_to'), 
                     concert['city'], 
+                    concert.get('country_code'),
                     concert['venue'],
                     concert['url'], 
                     concert.get('type'),
@@ -70,7 +71,7 @@ def upload_potential_concerts(data: list[dict]):
     return upload_concerts(data, table_name='potential_event')
 
 class Concert:
-    def __init__(self, title: str, date: str, source: str, time_from: str, time_to: str, city: str, venue: str, url: str, event_type: str):
+    def __init__(self, title: str, date: str, source: str, time_from: str, time_to: str, city: str, venue: str, url: str, event_type: str, country_code: str | None = None):
         self.title = title
         self.date = date
         self.source = source
@@ -80,6 +81,7 @@ class Concert:
         self.venue = venue
         self.url = url
         self.type = event_type
+        self.country_code = country_code
 
     def __str__(self):
         return f"{self.title} - {self.date} - {self.city} - {self.venue} - {self.url}"
@@ -94,8 +96,8 @@ class Concert:
             'time_from': self.time_from,
             'time_to': self.time_to,
             'city': self.city,
+            'country_code': self.country_code,
             'venue': self.venue,
             'url': self.url,
             'type': self.type,
         }
-
