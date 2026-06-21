@@ -77,6 +77,7 @@ URLS = [
 MODEL = "gpt-5.5"
 PROMPT_PATH = Path("prompts/build_crawler.mustache")
 CRAWLERS_DIR = Path("crawlers")
+BLOCKED_MARKER = "BLOCKED.md"
 CZECH_DOMAINS = {".cz"}
 SLOVAK_DOMAINS = {".sk"}
 CZECH_HOSTS = {
@@ -123,12 +124,21 @@ def render_prompt(url: str) -> str:
     return pystache.render(template, {"url": url, "country_code": country_code_for_url(url)})
 
 
+def crawler_status(crawler_dir: Path) -> str:
+    if not crawler_dir.exists():
+        return "BUILD"
+    if (crawler_dir / BLOCKED_MARKER).exists():
+        return "BLOCKED"
+    return "SKIP"
+
+
 def build_crawler(codex: Codex, url: str) -> str | None:
     folder_name = crawler_folder_name(url)
     crawler_dir = CRAWLERS_DIR / country_code_for_url(url).lower() / folder_name
+    status = crawler_status(crawler_dir)
 
-    if crawler_dir.exists():
-        print(f"SKIP {url} -> {crawler_dir} already exists")
+    if status != "BUILD":
+        print(f"{status} {url} -> {crawler_dir} already exists")
         return None
 
     prompt = render_prompt(url)
@@ -179,7 +189,7 @@ def main() -> None:
     if args.dry_run:
         for url in urls:
             crawler_dir = CRAWLERS_DIR / country_code_for_url(url).lower() / crawler_folder_name(url)
-            action = "SKIP" if crawler_dir.exists() else "BUILD"
+            action = crawler_status(crawler_dir)
             print(f"{action} {url} -> {crawler_dir}")
         return
 

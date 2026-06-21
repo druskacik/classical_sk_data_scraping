@@ -18,4 +18,11 @@ What I mean by description: description is a long body of text related to the co
 
 Save the new crawler to a new folder, similar to the existing crawlers: example.cz -> `crawlers/cz/example_cz/main.py`. Set `CrawlerConfig.country_code` to `{{ country_code }}`. After building, test it by running it and look at the output.
 
+If it is not possible to build a working crawler after investigating API and HTML options, create the target crawler directory but do not create `main.py`. Instead, create `BLOCKED.md` in that directory explaining:
+
+- the original URL
+- why a crawler cannot currently be implemented
+- which API, network, and HTML approaches were attempted
+- what would unblock implementation
+
 Build the crawler for the following url: {{ url }}
