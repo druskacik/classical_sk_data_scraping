@@ -7,6 +7,9 @@ import pandas as pd
 import jellyfish
 
 from google import genai
+from google.genai import types
+
+from analyzers.utils import generate_with_retry
 
 load_dotenv()
 
@@ -27,21 +30,23 @@ def get_composer_id(client, composer_name, composers_dict):
     composers_json = json.dumps(composers_dict)
     possible_ids = composers_dict.keys()
     prompt = build_prompt(composer_name, composers_json)
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
+    response = generate_with_retry(
+        client,
+        model="gemini-3.1-flash-lite",
         contents=prompt,
-        config={
-			'response_mime_type': 'text/x.enum',
-			'response_schema': {
-				"type": "STRING",
-				"enum": list([str(i) for i in possible_ids]) + ["None"],
-			},
-		},
+        config=types.GenerateContentConfig(
+            response_mime_type="text/x.enum",
+            response_schema={
+                "type": "STRING",
+                "enum": list([str(i) for i in possible_ids]) + ["None"],
+            },
+        ),
     )
     # Quota is 15 requests per minute
     time.sleep(4)
-    
-    return eval(response.text)
+
+    result = response.text.strip()
+    return None if result == "None" else int(result)
 
 def get_unprocessed_concerts(conn):
     cursor = conn.cursor()

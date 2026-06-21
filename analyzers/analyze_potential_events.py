@@ -5,6 +5,9 @@ import psycopg2
 from dotenv import load_dotenv
 
 from google import genai
+from google.genai import types
+
+from analyzers.utils import generate_with_retry
 
 load_dotenv()
 
@@ -22,20 +25,21 @@ def build_prompt(json_data):
 
 def is_classical_music_event(client, json_data):
     prompt = build_prompt(json_data)
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
+    response = generate_with_retry(
+        client,
+        model="gemini-3.1-flash-lite",
         contents=prompt,
-        config={
-			'response_mime_type': 'text/x.enum',
-			'response_schema': {
-				"type": "STRING",
-				"enum": ["true", "false"],
-			},
-		},
+        config=types.GenerateContentConfig(
+            response_mime_type="text/x.enum",
+            response_schema={
+                "type": "STRING",
+                "enum": ["true", "false"],
+            },
+        ),
     )
     # Quota is 15 requests per minute
     time.sleep(4)
-    
+
     return response.text
 
 def update_potential_event(conn, id, is_classical_concert):
