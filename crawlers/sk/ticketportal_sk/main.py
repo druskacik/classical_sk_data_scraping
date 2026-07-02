@@ -1,6 +1,7 @@
 import esprima
 from bs4 import BeautifulSoup
 import requests
+import re
 
 import pandas as pd
 
@@ -8,6 +9,22 @@ from ...base import BaseCrawler, CrawlerConfig
 
 ALREADY_PARSED_ORGANIZERS = [
     'https://www.ticketportal.sk/NEvent/SLOVENSKA_FILHARMONIA'
+]
+MUSIC_PATTERNS = [
+    r'\borgan\w*',
+    r'\bfilharm\w*',
+    r'\bkomorn\w*',
+    r'\borchester\b',
+    r'\borchestra\b',
+    r'\bsymfon\w*',
+    r'\bsymphon\w*',
+    r'\bpiano\b',
+    r'\bklav[ií]r\w*',
+    r'\bopera\b',
+    r'\bopern\w*',
+    r'\bbach\b',
+    r'\bmozart\b',
+    r'\bverdi\b',
 ]
 
 def extract_variable(ast, name):
@@ -42,12 +59,9 @@ def array_to_df(array, columns):
 	df = pd.DataFrame(data)
 	return df
 
-def is_classical(category):
-    if isinstance(category, list):
-        return 4 in category
-    if pd.isna(category):
-        return False
-    return category == 4
+def is_relevant_music_event(title):
+    title = str(title).lower()
+    return any(re.search(pattern, title) for pattern in MUSIC_PATTERNS)
 
 def get_slug(df_out, title):
     try:
@@ -75,9 +89,9 @@ def get_classical_concerts():
     df = array_to_df(events, ['id', 'title', 'id_0', 'category', 'id_1', 'img', 'id_podujatie_out', 'zvyraznenie', 'score'])
     df = df[['id', 'title', 'category']].copy()
     
-    df_is_classical = df['category'].apply(is_classical)
-    df = df[df_is_classical].copy()
+    df = df[df['title'].apply(is_relevant_music_event)].copy()
     df['slug'] = df['title'].apply(lambda x: get_slug(df_out, x))
+    df = df[df['slug'].notna()].copy()
     
     return df
 
@@ -89,15 +103,17 @@ def extract_organizator_url(soup):
     return None
 
 def extract_concert_info(div):
-    title = div.find('div', itemprop='name').text.strip()
+    title_tag = div.find('div', class_='event') or div.find('div', itemprop='name')
+    title = title_tag.get_text(' ', strip=True)
+    title = re.sub(r'\s+\d{1,2}\.\d{1,2}\.\d{4}\s+od\s+\d{1,2}:\d{2}\s+hod\.$', '', title).strip()
     date = div.find('div', itemprop='startDate')['content']
     
     location = div.find('div', itemprop='location')
     venue = location.find('span', itemprop='name').text.strip()
     city = location.find('div', itemprop='address').text.strip()
     return {
-		'title': title,
-		'date': date.split('T')[0].replace('-', '/'),
+			'title': title,
+			'date': date.split('T')[0],
 		'time_from': date.split('T')[1] if 'T' in date else None,
 		'venue': venue,
 		'city': city,
@@ -120,6 +136,7 @@ class TicketportalCrawler(BaseCrawler):
         source='Ticketportal.sk',
         source_url='https://www.ticketportal.sk',
         columns=['title', 'date', 'time_from', 'venue', 'city', 'url', 'organizer_url', 'description'],
+        upload_target='potential',
         front_fields=[
             ('source_url', 'https://www.ticketportal.sk'),
             ('source', 'Ticketportal.sk'),
@@ -163,4 +180,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

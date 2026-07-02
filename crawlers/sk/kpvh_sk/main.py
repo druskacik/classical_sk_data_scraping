@@ -1,4 +1,6 @@
 import re
+from datetime import date as date_cls
+
 import requests
 
 from bs4 import BeautifulSoup
@@ -20,6 +22,11 @@ def extract_concert_info(concert_div):
     
     date_and_venue_text = concert_div.find('h3').text.strip()
     date = extract_date(date_and_venue_text)
+    if date is None:
+        return None
+    formatted_date = format_date(date)
+    if date_cls.fromisoformat(formatted_date) < date_cls.today():
+        return None
     time = extract_time(date_and_venue_text)
     
     # Extract venue as text after 'hod.' and strip punctuation
@@ -38,12 +45,12 @@ def extract_concert_info(concert_div):
             url = f"https://www.kpvh.sk{href}"
                         
     return {
-		'title': remove_non_breaking_spaces(title),
-		'date': format_date(date),
-		'url': url,
-		'time_from': time,
-		'venue': venue
-	}
+			'title': remove_non_breaking_spaces(title),
+			'date': formatted_date,
+			'url': url,
+			'time_from': time,
+			'venue': venue
+		}
 
 def clean_whitespace(text):
     return re.sub(r'\s+', ' ', text).strip()
@@ -57,11 +64,15 @@ def clean_composer_name(name):
     return clean_whitespace(name)
     
 def extract_composers(url):
+    if not url:
+        return []
     print(url)
     r = requests.get(url)
     soup = BeautifulSoup(r.content, 'html.parser')
     
     content = soup.find('div', class_='mt-pricelist')
+    if content is None:
+        return []
     hs = content.find_all('h3')
     composers = [clean_composer_name(h.text.strip()) for h in hs]
     return list(set(composers))
@@ -86,7 +97,8 @@ class KpvhCrawler(BaseCrawler):
         soup = BeautifulSoup(r.content, 'html.parser')
 
         concert_divs = soup.find_all('div', class_='mt-i cf')
-        return [extract_concert_info(div) for div in concert_divs]
+        concerts = [extract_concert_info(div) for div in concert_divs]
+        return [concert for concert in concerts if concert is not None]
 
     def transform(self, df):
         if self.config.dedupe_subset:

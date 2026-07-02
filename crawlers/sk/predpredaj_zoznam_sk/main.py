@@ -6,6 +6,7 @@ from ...extractors import clean_string
 
 import json
 import html
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def parse_json(json_str):
     try:
@@ -35,10 +36,16 @@ def parse_json(json_str):
 
 def extract_concert_performances(concert_url):
     print(concert_url)
-    r = requests.get(concert_url)
+    if not concert_url.startswith('https://predpredaj.zoznam.sk/sk/listky/'):
+        return []
+
+    r = requests.get(concert_url, timeout=20)
     soup = BeautifulSoup(r.content, 'html.parser')
     
-    title = soup.find('h1').text.strip()
+    title_tag = soup.find('h1')
+    if title_tag is None:
+        return []
+    title = title_tag.text.strip()
     
     event_dates = soup.find('div', class_='event__dates')
     if event_dates is not None:
@@ -53,9 +60,21 @@ def extract_concert_performances(concert_url):
         return performances
      
     script = soup.find('script', attrs={'type': 'application/ld+json'})
+    if script is None:
+        return []
     info = parse_json(script.text)
     
-    date, time = info['startDate'].split()
+    start_date = info.get('startDate')
+    if not start_date:
+        return []
+    if 'T' in start_date:
+        date, time = start_date.split('T', 1)
+    else:
+        parts = start_date.split()
+        if len(parts) < 2:
+            return []
+        date, time = parts[:2]
+    time = time[:5]
     location = info['location']['name']
     city = info['location']['address']
     
@@ -92,7 +111,7 @@ class PredpredajCrawler(BaseCrawler):
 
     def scrape(self):
         url = 'https://predpredaj.zoznam.sk/sk/kategoria/koncert/'
-        r = requests.get(url)
+        r = requests.get(url, timeout=20)
         soup = BeautifulSoup(r.text, 'html.parser')
         concerts = soup.find_all('article')
 
@@ -100,8 +119,16 @@ class PredpredajCrawler(BaseCrawler):
             return f'https://predpredaj.zoznam.sk{concert.find("a")["href"]}'
 
         concert_urls = [extract_concert_url(c) for c in concerts if 'darcekove-poukazy' not in extract_concert_url(c)]
+        concert_urls = list(dict.fromkeys(concert_urls))
 
-        concert_data = [extract_concert_performances(url) for url in concert_urls]
+        concert_data = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(extract_concert_performances, url) for url in concert_urls]
+            for future in as_completed(futures):
+                try:
+                    concert_data.append(future.result())
+                except Exception as exc:
+                    print(f'Error extracting Predpredaj event: {exc}')
         return [item for sublist in concert_data for item in sublist]
 
     def transform(self, df):

@@ -1,5 +1,7 @@
 import time
 import datetime
+from concurrent.futures import ThreadPoolExecutor
+
 import requests
 import urllib3
 
@@ -55,10 +57,15 @@ def get_concert_data(url: str):
 
 def extract_description(url):
     print(url)
-    r = requests.get(url, verify=False)
+    r = requests.get(url, verify=False, timeout=20)
     soup = BeautifulSoup(r.text, 'html.parser')
     description = soup.find('meta', attrs={'property': 'og:description'})
-    return description.get('content').strip()
+    if description and description.get('content'):
+        return description.get('content').strip()
+    content = soup.find('div', class_='content') or soup.find('main')
+    if content:
+        return content.get_text('\n', strip=True)
+    return None
 
 
 class SndCrawler(BaseCrawler):
@@ -103,9 +110,10 @@ class SndCrawler(BaseCrawler):
         return concert_data
 
     def transform(self, df):
-        df = df[df['type'].isin(['opera', 'balet'])]
+        df = df[df['type'].isin(['opera', 'balet'])].copy()
         df['url'] = df['url'].apply(lambda x: f'https://snd.sk{x}')
-        df['description'] = df['url'].apply(extract_description)
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            df['description'] = list(executor.map(extract_description, df['url']))
         return df
 
 
@@ -115,4 +123,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

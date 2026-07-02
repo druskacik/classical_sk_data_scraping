@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import date, datetime
 import requests
 
 from bs4 import BeautifulSoup
@@ -7,8 +7,9 @@ from bs4 import BeautifulSoup
 from ...base import BaseCrawler, CrawlerConfig
 
 def get_concerts():
-    today = str(datetime.today()).split()[0]
-    url = f'https://www.filharmonia.sk/events-feed?start={today}'
+    today = date.today()
+    month_start = today.replace(day=1)
+    url = f'https://www.filharmonia.sk/events-feed?start={month_start.isoformat()}'
     r = requests.get(url)
     concerts = r.json()
     concerts = [{
@@ -17,7 +18,7 @@ def get_concerts():
         'time_from': c['start'].split('T')[1],
         'time_to': c['end'].split('T')[1],
         'url': f'https://filharmonia.sk{c["view_node"].removesuffix("/modal")}',
-    } for c in concerts]
+    } for c in concerts if datetime.fromisoformat(c['end']).date() >= today]
     return concerts
 
 def get_concert_description(url):
@@ -61,4 +62,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -1,4 +1,6 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -14,7 +16,7 @@ def extract_event_url(concert):
 def crawl_event_urls():
     url = 'https://podujatia.pkopresov.sk/'
     print(url)
-    r = requests.get(url)
+    r = requests.get(url, timeout=20)
     soup = BeautifulSoup(r.text, 'html.parser')
     posts_widget = soup.find('div', class_='elementor-element', attrs={'data-widget_type': 'tootoot-event-list.tiles'})
     
@@ -26,7 +28,7 @@ def crawl_event_urls():
     while True:
         url = f'https://podujatia.pkopresov.sk/wp-json/elementor-pro/v1/posts-widget?post_id=1100&element_id={data_id}&page={page}'
         print(url)
-        r = requests.get(url)
+        r = requests.get(url, timeout=20)
         data = r.json()
         soup = BeautifulSoup(data['content'], 'html.parser')
         event_elements = soup.find_all('div', class_='tt-evt-li__event-info')
@@ -38,33 +40,31 @@ def crawl_event_urls():
             event_urls.append(url)
         page += 1
 
-    return event_urls
+    return [url for url in event_urls if '/event-detail/' in url]
 
 def extract_event_info(url):
     print(url)
-    r = requests.get(url)
+    r = requests.get(url, timeout=20)
     soup = BeautifulSoup(r.text, 'html.parser')
     script = soup.find('script', type='application/ld+json')
+    if script is None:
+        return None
     info = json.loads(script.text)
-    
-    ps = soup.find_all('div', class_='elementor-widget-text-editor')
-    next_is_about = False
-    description = None
-    for p in ps:
-        if next_is_about:
-            description = p.get_text().strip()
-            break
-        if p.text.strip() == 'About':
-            next_is_about = True
+    if info.get('name', '').lower().startswith('darčeková poukážka'):
+        return None
+
+    description = info.get('description')
+    location = info.get('location') or {}
+    address = location.get('address') or {}
     return {
-		'title': info['name'],
-		'date': info['startDate'].split('T')[0],
-		'time_from': info['startDate'].split('T')[1][:5],
-		'venue': info['location']['name'],
-		'city': info['location']['address']['addressLocality'],
-		'url': url,
-		'description': description
-	}
+			'title': info['name'],
+			'date': info['startDate'].split('T')[0],
+			'time_from': info['startDate'].split('T')[1][:5],
+			'venue': location.get('name'),
+			'city': address.get('addressLocality'),
+			'url': url,
+			'description': description
+		}
 
 
 
@@ -84,7 +84,18 @@ class PkoPresovCrawler(BaseCrawler):
 
     def scrape(self):
         event_urls = crawl_event_urls()
-        return [extract_event_info(url) for url in event_urls]
+        concerts = []
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(extract_event_info, url) for url in event_urls]
+            for future in as_completed(futures):
+                try:
+                    concert = future.result()
+                except Exception as exc:
+                    print(f'Error extracting PKO Prešov event: {exc}')
+                    continue
+                if concert is not None:
+                    concerts.append(concert)
+        return sorted(concerts, key=lambda concert: (concert['date'], concert['time_from'], concert['title']))
 
 
 def main():

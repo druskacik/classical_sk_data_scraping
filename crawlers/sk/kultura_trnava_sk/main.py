@@ -4,27 +4,26 @@ from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
 
-URL = 'https://kultura.trnava.sk/podujatie/trnavska-hudobna-jar-2025'
+URL = 'https://kultura.trnava.sk/podujatie/trnavske-organove-dni-2026'
 
-def extract_event_info(event):
-    tag = event.find('span', class_='tag').find('a')
-    title = tag['data-name']
-    date_and_time = tag['data-date']
+def extract_event_info(anchor):
+    date_and_time = anchor['data-date']
     date, time = date_and_time.split(' ')
-    venue = tag['data-location']
+    event = anchor.find_parent('div', class_='event')
     
-    description = None
-    p = event.find('p', attrs={'dir': 'ltr'})
-    if p:
-        description = p.text.strip()
+    description = ''
+    if event:
+        content = event.find('div', class_='content')
+        if content:
+            description = content.get_text(' ', strip=True)
         
     return {
-		'title': title,
-		'date': date,
-		'time': time,
-		'venue': venue,
-		'description': description
-	}
+			'title': anchor['data-name'],
+			'date': date,
+			'time_from': time[:5],
+			'venue': anchor['data-location'],
+			'description': description
+		}
 
 
 class KulturaTrnavaCrawler(BaseCrawler):
@@ -45,8 +44,8 @@ class KulturaTrnavaCrawler(BaseCrawler):
         r = requests.get(URL)
         soup = BeautifulSoup(r.content, 'html.parser')
 
-        concert_divs = soup.find_all('div', class_='event')
-        return [extract_event_info(div) for div in concert_divs]
+        anchors = soup.find_all('a', class_='js-ical', attrs={'data-date': True, 'data-name': True})
+        return [extract_event_info(anchor) for anchor in anchors]
 
 
 def main():

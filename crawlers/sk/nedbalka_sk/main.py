@@ -1,3 +1,5 @@
+from datetime import date as date_cls
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -37,12 +39,12 @@ def extract_concerts(soup):
         title = f'musica_litera: {title.text.strip()}'
         concerts.append({
             'title': title,
-            'date': f'{year}-{month:02d}-{day}',
+            'date': f'{year}-{month:02d}-{int(day):02d}',
             'url': ol.find_next('a')['href'],
             'time_from': time_from,
             'composers': composers,
         })
-    return concerts
+    return [concert for concert in concerts if date_cls.fromisoformat(concert['date']) >= date_cls.today()]
 
 class NedbalkaCrawler(BaseCrawler):
     config = CrawlerConfig(

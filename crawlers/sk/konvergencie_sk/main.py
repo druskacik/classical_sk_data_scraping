@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
-from ...extractors import extract_date, extract_time
+from ...extractors import extract_city, extract_date, extract_time
 
 def convert_date(date_str):
     """
@@ -15,48 +15,60 @@ def convert_date(date_str):
     if not isinstance(date_str, str):
         return None
     sep = '/' if '/' in date_str else '.'
-    return f'{date_str.split(sep)[2]}-{date_str.split(sep)[1]}-{date_str.split(sep)[0]}'
+    parts = [part.strip() for part in date_str.split(sep)]
+    return f'{parts[2]}-{int(parts[1]):02d}-{int(parts[0]):02d}'
 
 def validate_concert(concert):
     if concert['date'] is None:
+        return False
+    if datetime.date.fromisoformat(concert['date']) < datetime.date.today():
         return False
     if 'permanentka' in concert['title'].lower():
         return False
     return True
 
 def validate_venue(venue):
+    if venue is None:
+        return None
     if venue in ['Moyzesova sieň']:
         return 'Moyzesova sieň'
     if 'Dom hudby' in venue:
         return 'Dom hudby'
-    return None
+    return venue
+
+def extract_city_from_venue(venue):
+    city = extract_city(venue or '')
+    return city or 'Bratislava'
 
 def extract_concert_info(concert):
     title = concert.find('span', class_='clickable--ProfileName').text.strip()
     url = concert.find('a')['href']
-    info = concert.find('div', class_='tt-evt-li__sub-info').text.strip()
-    date = extract_date(info)
-    venue = info.split(' / ')[1]
-    time = extract_time(info)
-    description = concert.find('div', class_='tt-evt-li__sub-info--About').text.strip()
+    info_tag = concert.find('div', class_='tt-evt-li__sub-info')
+    info = info_tag.get_text('\n', strip=True) if info_tag else ''
+    metadata = info.splitlines()[0] if info else ''
+    date = extract_date(metadata)
+    time = extract_time(metadata)
+    parts = [part.strip() for part in metadata.split(' / ')]
+    venue = next((part for part in parts if part and not extract_date(part) and extract_time(part) is None and part.isupper() is False), None)
+    description = info
     return {
-		'title': title,
-		'url': url,
-		'date': convert_date(date),
-		'time_from': time,
-		'time_to': None,
-		'venue': validate_venue(venue),
-        'description': description,
-	}
+			'title': title,
+			'url': url,
+			'date': convert_date(date),
+			'time_from': time,
+			'time_to': None,
+			'venue': validate_venue(venue),
+            'city': extract_city_from_venue(venue),
+	        'description': description,
+		}
     
 class KonvergencieCrawler(BaseCrawler):
     config = CrawlerConfig(
         slug='konvergencie_sk',
         source='Konvergencie',
         source_url='https://www.konvergencie.sk',
-        columns=['title', 'date', 'url', 'time_from', 'time_to', 'venue', 'description'],
+        columns=['title', 'date', 'url', 'time_from', 'time_to', 'venue', 'city', 'description'],
         front_fields=[
-            ('city', 'Bratislava'),
             ('source_url', 'https://www.konvergencie.sk'),
             ('source', 'Konvergencie'),
         ],
@@ -78,5 +90,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-

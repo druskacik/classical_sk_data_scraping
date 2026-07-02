@@ -5,23 +5,21 @@ from bs4 import BeautifulSoup
 from ...base import BaseCrawler, CrawlerConfig
 
 def extract_data_ids():
-    current_month = datetime.now().strftime('%Y%m')
+    current_month = datetime.now().replace(day=1)
     base_url = 'https://www.sdke.sk/sk/divadlo/program/'
     
     data_id_values = []
     
-    while True:
-        url = f"{base_url}{current_month}"
+    for _ in range(12):
+        current_month_str = current_month.strftime('%Y%m')
+        url = f"{base_url}{current_month_str}"
         print(url)
         r = requests.get(url)
         soup = BeautifulSoup(r.content, 'html.parser')
         spans_with_data_id = soup.find_all('span', attrs={'data-id': True})
-        if len(spans_with_data_id) == 0:
-            break
         data_id_values.extend([span['data-id'] for span in spans_with_data_id])
-        current_month = datetime.strptime(current_month, '%Y%m')
         current_month = current_month + timedelta(days=31)
-        current_month = current_month.strftime('%Y%m')
+        current_month = current_month.replace(day=1)
         
     return list(set(data_id_values))
 
@@ -114,7 +112,7 @@ class SdkeCrawler(BaseCrawler):
                 concert_data.append({
                     **obj,
                     'url': url,
-                    'date': date_obj.strftime('%Y/%m/%d'),
+                    'date': date_obj.strftime('%Y-%m-%d'),
                     'time_from': time_part,
                     'link': obj['links'].split('|')[i],
                     'type': extract_type(obj['path']),
