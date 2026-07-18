@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 from pathlib import Path
-from shutil import which
 from urllib.parse import urlparse
 
 import pystache
@@ -193,11 +193,9 @@ def main() -> None:
             print(f"{action} {url} -> {crawler_dir}")
         return
 
-    codex_bin = which("codex")
-    if not codex_bin:
-        raise RuntimeError("Could not find `codex` binary. Is it installed and on PATH?")
-
-    with Codex(CodexConfig(codex_bin=codex_bin, cwd=str(Path.cwd()))) as codex:
+    with Codex(
+        CodexConfig(codex_bin=os.getenv("CODEX_BIN"), cwd=str(Path.cwd()))
+    ) as codex:
         for url in urls:
             final_response = build_crawler(codex, url)
             if final_response:

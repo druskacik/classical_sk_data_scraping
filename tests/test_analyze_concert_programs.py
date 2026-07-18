@@ -64,12 +64,10 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
     @patch.object(analyzer, "validate_model")
     @patch.object(analyzer, "select_concerts")
     @patch.object(analyzer, "get_connection")
-    @patch.object(analyzer, "which", return_value="/usr/bin/codex")
     @patch.object(analyzer, "Codex")
     def test_dry_run_never_persists(
         self,
         codex_class,
-        _which,
         get_connection,
         select_concerts,
         _validate_model,
@@ -91,6 +89,8 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         with patch("sys.stdout", new_callable=io.StringIO):
             failures = analyzer.run(concert_ids=[1], commit=False)
         self.assertEqual(failures, 0)
+        config = codex_class.call_args.args[0]
+        self.assertIsNone(config.codex_bin)
         persist_result.assert_not_called()
         conn.commit.assert_not_called()
         conn.close.assert_called_once()

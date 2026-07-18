@@ -7,7 +7,6 @@ import threading
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from shutil import which
 from typing import Any
 
 import psycopg2
@@ -393,9 +392,6 @@ def run(
     force: bool = False,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> int:
-    codex_bin = which("codex")
-    if not codex_bin:
-        raise RuntimeError("Could not find `codex` binary")
     conn = get_connection()
     locked = False
     failures = 0
@@ -409,7 +405,9 @@ def run(
         if not concerts:
             print("No concerts eligible for programme analysis.")
             return 0
-        with Codex(CodexConfig(codex_bin=codex_bin, cwd=str(Path.cwd()))) as codex:
+        with Codex(
+            CodexConfig(codex_bin=os.getenv("CODEX_BIN"), cwd=str(Path.cwd()))
+        ) as codex:
             validate_model(codex, model)
             for concert in concerts:
                 print(f"Analyzing concert {concert.id}: {concert.title}")
