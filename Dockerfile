@@ -21,5 +21,5 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
 # Copy the rest of the application code
 COPY . .
 
-# Command to run the application
-CMD ["python", "main.py"]
+# Apply database migrations before starting the application.
+CMD ["sh", "-c", "alembic upgrade head && exec python main.py"]
