@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Run a read-only SQL query against the project Postgres database and print results.
-Uses DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT from environment (.env).
+Uses DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT from environment (.env by
+default, or .env.prod.env when --prod is passed).
 """
 import argparse
 import csv
@@ -9,16 +10,24 @@ import os
 import sys
 from pathlib import Path
 
-# Load .env from project root so script works from any cwd
 import dotenv
-dotenv.load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import psycopg2
 from psycopg2 import sql
 
 
-def get_connection():
+def load_environment(prod=False):
+    """Load the selected project environment file from any working directory."""
+    filename = ".env.prod.env" if prod else ".env"
+    dotenv.load_dotenv(
+        Path(__file__).resolve().parent.parent / filename,
+        override=prod,
+    )
+
+
+def get_connection(prod=False):
     """Build a read-only Postgres connection from env."""
+    load_environment(prod=prod)
     conn = psycopg2.connect(
         dbname=os.getenv("DB_NAME", "classical_sk"),
         user=os.getenv("DB_USER", "postgres"),
@@ -36,6 +45,11 @@ def main():
         description="Run a read-only SQL query and print results (CSV to stdout)."
     )
     parser.add_argument(
+        "--prod",
+        action="store_true",
+        help="Connect using .env.prod.env instead of the default .env.",
+    )
+    parser.add_argument(
         "--query",
         "-q",
         required=True,
@@ -51,7 +65,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        conn = get_connection()
+        conn = get_connection(prod=args.prod)
     except Exception as e:
         print(f"Connection error: {e}", file=sys.stderr)
         sys.exit(1)
