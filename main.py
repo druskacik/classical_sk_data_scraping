@@ -33,11 +33,9 @@ if __name__ == "__main__":
     
     # Add the analyzer function
     from analyzers.analyze_potential_events import main as analyze_potential_events_main
-    from analyzers.get_composers import main as get_composers_main
-    from analyzers.process_composers import main as process_composers_main
+    from analyzers.analyze_concert_programs import scheduled_main as analyze_concert_programs_main
     crawler_functions.append(analyze_potential_events_main)
-    crawler_functions.append(get_composers_main)
-    crawler_functions.append(process_composers_main)
+    crawler_functions.append(analyze_concert_programs_main)
     
     print('Running crawlers...')
     # Run all crawlers initially

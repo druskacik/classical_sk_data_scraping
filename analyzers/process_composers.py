@@ -10,6 +10,7 @@ from google import genai
 from google.genai import types
 
 from analyzers.utils import generate_with_retry
+from agent_utils.concert_catalog import normalize
 
 load_dotenv()
 
@@ -79,10 +80,23 @@ def find_composers_with_similar_name(conn, composer_name):
 def insert_new_composer(conn, composer_name, concert_ids, composer_id=None):
     cursor = conn.cursor()
     if composer_id is None:
-        cursor.execute("INSERT INTO composer (name) VALUES (%s) RETURNING id", (composer_name,))
+        cursor.execute(
+            """
+            INSERT INTO composer (name, normalized_name) VALUES (%s, %s)
+            ON CONFLICT (normalized_name) DO UPDATE SET normalized_name = EXCLUDED.normalized_name
+            RETURNING id
+            """,
+            (composer_name, normalize(composer_name)),
+        )
         composer_id = cursor.fetchone()[0]
     for concert_id in concert_ids:
-        cursor.execute("INSERT INTO classical_concert_composer (classical_concert_id, composer_id) VALUES (%s, %s)", (concert_id, composer_id))
+        cursor.execute(
+            """
+            INSERT INTO classical_concert_composer (classical_concert_id, composer_id)
+            VALUES (%s, %s) ON CONFLICT DO NOTHING
+            """,
+            (concert_id, composer_id),
+        )
     conn.commit()
     cursor.close()
 
