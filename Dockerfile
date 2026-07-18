@@ -26,9 +26,13 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
 # Copy the rest of the application code
 COPY . .
 
-# Install the vendored experimental Codex Python SDK without pulling a second
-# CLI package; the standalone binary above is the runtime used by the SDK.
-RUN pip install --no-cache-dir --no-deps -e vendor/codex/sdk/python
+# Install the vendored experimental Codex Python SDK into site-packages without
+# pulling a second CLI package; the standalone binary above is used at runtime.
+# Import it during the build so a missing submodule or broken SDK install fails
+# the image build instead of causing a container restart loop.
+RUN pip install --no-cache-dir --no-deps vendor/codex/sdk/python && \
+    python -c "import openai_codex; print(openai_codex.__version__)" && \
+    codex --version
 
 # Apply database migrations before starting the application.
 CMD ["sh", "-c", "alembic upgrade head && exec python main.py"]
