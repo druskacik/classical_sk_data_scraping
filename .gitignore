@@ -1,5 +1,6 @@
 data/*
 .venv
+.uv-cache/
 
 !data/.gitkeep
 !data/cities_with_postal_code.csv

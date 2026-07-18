@@ -29,3 +29,4 @@ py-modules = []
 
 [tool.uv]
 package = true
+cache-dir = ".uv-cache"
