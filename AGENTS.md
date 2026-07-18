@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Data scraping pipeline for classical music events in Slovakia. Crawlers scrape concert listings from ~20 Slovak cultural websites, store them in a PostgreSQL database, and use Gemini AI to classify events and extract composer information.
+Data scraping pipeline for classical music events. Crawlers scrape concert listings from cultural websites, store them in a PostgreSQL database, use Gemini AI to classify broad-source events, and use the Codex SDK to extract concert programmes.
 
 ## Commands
 
@@ -26,9 +26,8 @@ Package management uses `uv` (not pip).
 ### Pipeline flow
 
 1. **Crawlers** (`crawlers/<country_code>/<site>/main.py`) — Each crawler has a `main()` function that scrapes a specific website, saves results to `data/<site>.csv`, and uploads to the DB via `upload_concerts()`.
-2. **Analyzer: classify events** (`analyzers/analyze_potential_events.py`) — Uses Gemini to determine if events in `potential_event` table are classical music, then copies confirmed ones to `classical_concert`.
-3. **Analyzer: extract composers** (`analyzers/get_composers.py`) — Uses Gemini to extract composer names from concert descriptions in `classical_concert`.
-4. **Analyzer: match composers** (`analyzers/process_composers.py`) — Fuzzy-matches extracted composer names (jellyfish) against the `composer` table, using Gemini to disambiguate, then links via `classical_concert_composer` join table.
+2. **Analyzer: classify events** (`analyzers/analyze_potential_events.py`) — Uses Gemini to determine if events in the `potential_event` table are classical music, then copies confirmed ones to `classical_concert`.
+3. **Analyzer: extract concert programmes** (`analyzers/analyze_concert_programs.py`) — Uses the Codex SDK to inspect concert sources, resolve composers and works, and populate the concert programme tables.
 
 ### Two upload paths
 
@@ -50,7 +49,7 @@ Package management uses `uv` (not pip).
 
 ### Environment variables (.env)
 
-`DB_NAME`, `DB_USER`, `DB_PASS`, `DB_HOST`, `DB_PORT`, `GEMINI_API_KEY`
+`DB_NAME`, `DB_USER`, `DB_PASS`, `DB_HOST`, `DB_PORT`, `GEMINI_API_KEY`, `CODEX_HOME`
 
 ## Adding a new crawler
 
