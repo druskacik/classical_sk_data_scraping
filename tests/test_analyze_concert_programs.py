@@ -20,7 +20,12 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         )
         self.assertIn("Always try to open and inspect the live URL first", prompt)
         self.assertIn("fallback context", prompt)
-        self.assertIn("list-works --composer-id ID", prompt)
+        self.assertIn(
+            'python -m agent_utils.concert_catalog find-composer --name "NAME"',
+            prompt,
+        )
+        self.assertIn("python -m agent_utils.concert_catalog list-works --composer-id ID", prompt)
+        self.assertNotIn("uv run", prompt)
         self.assertIn("standard English title of the complete composition", prompt)
         self.assertIn("standard English name in programme_label", prompt)
         self.assertIn("original wording in evidence", prompt)
