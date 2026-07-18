@@ -4,6 +4,15 @@ import importlib
 import os
 from pathlib import Path
 
+
+RUN_JOBS_ON_STARTUP_ENV = "RUN_JOBS_ON_STARTUP"
+
+
+def should_run_jobs_on_startup():
+    """Return whether scheduled jobs should also run immediately on process startup."""
+    return os.getenv(RUN_JOBS_ON_STARTUP_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def discover_crawler_modules():
     """Discover and import all crawler main functions"""
     crawler_modules = []
@@ -37,10 +46,12 @@ if __name__ == "__main__":
     crawler_functions.append(analyze_potential_events_main)
     crawler_functions.append(analyze_concert_programs_main)
     
-    print('Running crawlers...')
-    # Run all crawlers initially
-    for func in crawler_functions:
-        run_job(func)
+    if should_run_jobs_on_startup():
+        print(f"{RUN_JOBS_ON_STARTUP_ENV} is enabled; running all jobs immediately...")
+        for func in crawler_functions:
+            run_job(func)
+    else:
+        print(f"Skipping immediate job run; set {RUN_JOBS_ON_STARTUP_ENV}=true to enable it.")
     
     print("Scheduling crawlers...")
     # Schedule all crawlers to run at 2-minute intervals starting at 01:00
