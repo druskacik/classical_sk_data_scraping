@@ -58,6 +58,35 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least one"):
             analyzer.validate_result(MagicMock(), concert, result)
 
+    def test_automatic_selection_excludes_past_concerts(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = []
+
+        analyzer.select_concerts(conn, concert_ids=None, limit=25, force=False)
+
+        query = cursor.execute.call_args.args[0]
+        self.assertIn("c.program_analysis_eligible = true", query)
+        self.assertIn("c.date >= CURRENT_DATE", query)
+
+    def test_agent_threads_are_persistent(self):
+        codex = MagicMock()
+        thread = codex.thread_start.return_value
+        thread.turn.return_value.run.return_value.error = None
+        thread.turn.return_value.run.return_value.final_response = json.dumps(
+            {
+                "status": "no_program",
+                "source_url": "https://example.test",
+                "notes": "No programme published.",
+                "program": [],
+            }
+        )
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+
+        analyzer.run_agent(codex, concert, "gpt-5.6-terra", timeout_seconds=30)
+
+        self.assertIs(codex.thread_start.call_args.kwargs["ephemeral"], False)
+
     @patch.object(analyzer, "persist_result")
     @patch.object(analyzer, "validate_result")
     @patch.object(analyzer, "run_agent")

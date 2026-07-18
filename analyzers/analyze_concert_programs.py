@@ -128,6 +128,7 @@ def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool
                 FROM classical_concert c
                 LEFT JOIN concert_program_analysis a ON a.classical_concert_id = c.id
                 WHERE c.program_analysis_eligible = true
+                  AND c.date >= CURRENT_DATE
                   AND (
                     a.id IS NULL
                     OR (a.status = 'no_program' AND c.date >= CURRENT_DATE)
@@ -181,7 +182,7 @@ def run_agent(codex: Codex, concert: Concert, model: str, timeout_seconds: int) 
     thread = codex.thread_start(
         approval_mode=ApprovalMode.deny_all,
         cwd=str(Path.cwd()),
-        ephemeral=True,
+        ephemeral=False,
         model=model,
         sandbox=Sandbox.full_access,
     )
