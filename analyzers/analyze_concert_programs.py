@@ -24,6 +24,7 @@ DEFAULT_MODEL = "gpt-5.6-terra"
 DEFAULT_LIMIT = 25
 DEFAULT_TIMEOUT_SECONDS = 600
 MAX_AUTOMATIC_ATTEMPTS = 3
+NO_PROGRAM_RETRY_INTERVAL_DAYS = 7
 ADVISORY_LOCK_NAME = "classical-sk-concert-program-analysis"
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "analyze_concert_program.mustache"
 
@@ -33,10 +34,22 @@ OUTPUT_SCHEMA: dict[str, Any] = {
     "properties": {
         "status": {
             "type": "string",
-            "enum": ["complete", "ambiguous", "no_program", "page_unavailable"],
+            "enum": ["complete", "composer_only", "ambiguous", "no_program", "page_unavailable"],
         },
         "source_url": {"type": "string"},
         "notes": {"type": "string"},
+        "composers": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "existing_id": {"type": ["integer", "null"]},
+                    "name": {"type": "string"},
+                },
+                "required": ["existing_id", "name"],
+            },
+        },
         "program": {
             "type": "array",
             "items": {
@@ -69,7 +82,7 @@ OUTPUT_SCHEMA: dict[str, Any] = {
             },
         },
     },
-    "required": ["status", "source_url", "notes", "program"],
+    "required": ["status", "source_url", "notes", "composers", "program"],
 }
 
 
@@ -115,7 +128,7 @@ def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool
                 FROM classical_concert c
                 LEFT JOIN concert_program_analysis a ON a.classical_concert_id = c.id
                 WHERE c.id = ANY(%s)
-                  AND (%s OR a.status IS NULL OR a.status NOT IN ('complete', 'ambiguous', 'expired_no_program', 'failed'))
+                  AND (%s OR a.status IS NULL OR a.status NOT IN ('complete', 'composer_only', 'ambiguous', 'expired_no_program', 'failed'))
                 ORDER BY c.id
                 LIMIT %s
                 """,
@@ -131,13 +144,22 @@ def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool
                   AND c.date >= CURRENT_DATE
                   AND (
                     a.id IS NULL
-                    OR (a.status = 'no_program' AND c.date >= CURRENT_DATE)
+                    OR (
+                      a.status = 'no_program'
+                      AND a.attempts < %s
+                      AND a.last_attempted_at <= now() - make_interval(days => %s)
+                    )
                     OR (a.status IN ('page_unavailable', 'error') AND a.attempts < %s)
                   )
                 ORDER BY c.date, c.id
                 LIMIT %s
                 """,
-                (MAX_AUTOMATIC_ATTEMPTS, limit),
+                (
+                    MAX_AUTOMATIC_ATTEMPTS,
+                    NO_PROGRAM_RETRY_INTERVAL_DAYS,
+                    MAX_AUTOMATIC_ATTEMPTS,
+                    limit,
+                ),
             )
         return [Concert(*row) for row in cursor.fetchall()]
 
@@ -210,14 +232,24 @@ def run_agent(codex: Codex, concert: Concert, model: str, timeout_seconds: int) 
 
 def validate_result(conn, concert: Concert, result: dict[str, Any]) -> None:
     status = result["status"]
+    composers = result["composers"]
     program = result["program"]
     if status == "complete" and not program:
         raise ValueError("A complete result must contain at least one composer/work pair")
-    if status in {"no_program", "page_unavailable"} and program:
+    if status == "complete" and not composers:
+        raise ValueError("A complete result must contain its identified composers")
+    if status == "composer_only" and (not composers or program):
+        raise ValueError("A composer_only result must contain composers and no programme entries")
+    if status in {"no_program", "page_unavailable"} and (composers or program):
         raise ValueError(f"A {status} result must not contain catalogue entries")
+    if result["source_url"].strip() == "":
+        raise ValueError("source_url must not be empty")
     if status in {"ambiguous", "no_program", "page_unavailable"}:
         return
     with conn.cursor() as cursor:
+        for composer in composers:
+            _validate_composer(cursor, composer)
+        listed_composers = {_composer_identity(composer) for composer in composers}
         for entry in program:
             composer = entry["composer"]
             work = entry["work"]
@@ -225,10 +257,9 @@ def validate_result(conn, concert: Concert, result: dict[str, Any]) -> None:
                 raise ValueError("Composer names and work titles must not be empty")
             if not entry["programme_label"].strip():
                 raise ValueError("Programme labels must not be empty")
-            if composer["existing_id"] is not None:
-                cursor.execute("SELECT 1 FROM composer WHERE id = %s", (composer["existing_id"],))
-                if cursor.fetchone() is None:
-                    raise ValueError(f"Unknown composer ID {composer['existing_id']}")
+            _validate_composer(cursor, composer)
+            if _composer_identity(composer) not in listed_composers:
+                raise ValueError("Every programme composer must appear in the top-level composers list")
             if work["existing_id"] is not None:
                 cursor.execute("SELECT composer_id FROM work WHERE id = %s", (work["existing_id"],))
                 row = cursor.fetchone()
@@ -236,8 +267,21 @@ def validate_result(conn, concert: Concert, result: dict[str, Any]) -> None:
                     raise ValueError(f"Unknown work ID {work['existing_id']}")
                 if composer["existing_id"] is None or row[0] != composer["existing_id"]:
                     raise ValueError("Existing work does not belong to the selected existing composer")
-    if result["source_url"].strip() == "":
-        raise ValueError("source_url must not be empty")
+
+
+def _validate_composer(cursor, composer: dict[str, Any]) -> None:
+    if not composer["name"].strip():
+        raise ValueError("Composer names must not be empty")
+    if composer["existing_id"] is not None:
+        cursor.execute("SELECT 1 FROM composer WHERE id = %s", (composer["existing_id"],))
+        if cursor.fetchone() is None:
+            raise ValueError(f"Unknown composer ID {composer['existing_id']}")
+
+
+def _composer_identity(composer: dict[str, Any]) -> tuple[str, int | str]:
+    if composer["existing_id"] is not None:
+        return ("id", composer["existing_id"])
+    return ("name", normalize(composer["name"]))
 
 
 def _resolve_composer(cursor, composer: dict[str, Any]) -> int:
@@ -275,10 +319,10 @@ def _resolve_work(cursor, composer_id: int, work: dict[str, Any]) -> int:
 
 def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -> None:
     status = result["status"]
-    completed = status in {"complete", "ambiguous", "expired_no_program", "failed"}
+    completed = status in {"complete", "composer_only", "ambiguous", "expired_no_program", "failed"}
     try:
         with conn.cursor() as cursor:
-            if status == "complete":
+            if status in {"complete", "composer_only"}:
                 cursor.execute(
                     "DELETE FROM classical_concert_work WHERE classical_concert_id = %s",
                     (concert.id,),
@@ -287,9 +331,10 @@ def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -
                     "DELETE FROM classical_concert_composer WHERE classical_concert_id = %s",
                     (concert.id,),
                 )
-                for entry in result["program"]:
-                    composer_id = _resolve_composer(cursor, entry["composer"])
-                    work_id = _resolve_work(cursor, composer_id, entry["work"])
+                composer_ids = {}
+                for composer in result["composers"]:
+                    composer_id = _resolve_composer(cursor, composer)
+                    composer_ids[_composer_identity(composer)] = composer_id
                     cursor.execute(
                         """
                         INSERT INTO classical_concert_composer (classical_concert_id, composer_id)
@@ -297,6 +342,10 @@ def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -
                         """,
                         (concert.id, composer_id),
                     )
+            if status == "complete":
+                for entry in result["program"]:
+                    composer_id = composer_ids[_composer_identity(entry["composer"])]
+                    work_id = _resolve_work(cursor, composer_id, entry["work"])
                     cursor.execute(
                         """
                         INSERT INTO classical_concert_work
@@ -334,6 +383,8 @@ def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -
                     completed_at = CASE
                         WHEN EXCLUDED.status = 'page_unavailable'
                          AND concert_program_analysis.attempts + 1 >= %s THEN now()
+                        WHEN EXCLUDED.status = 'no_program'
+                         AND concert_program_analysis.attempts + 1 >= %s THEN now()
                         ELSE EXCLUDED.completed_at
                     END
                 """,
@@ -343,6 +394,7 @@ def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -
                     model,
                     Json(result, dumps=lambda value: json.dumps(value, ensure_ascii=False)),
                     completed,
+                    MAX_AUTOMATIC_ATTEMPTS,
                     MAX_AUTOMATIC_ATTEMPTS,
                     MAX_AUTOMATIC_ATTEMPTS,
                 ),
