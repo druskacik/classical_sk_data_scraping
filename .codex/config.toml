@@ -1,6 +1,6 @@
 [mcp_servers.playwright]
 command = "npx"
-args = ["@playwright/mcp@latest", "--isolated"]
+args = ["--yes", "@playwright/mcp@0.0.78", "--isolated"]
 
 [mcp_servers.playwright.tools.browser_tabs]
 approval_mode = "approve"

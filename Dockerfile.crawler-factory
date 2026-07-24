@@ -1,0 +1,34 @@
+FROM python:3.12-slim
+
+ARG PLAYWRIGHT_MCP_VERSION=0.0.78
+
+WORKDIR /factory
+
+COPY pyproject.toml uv.lock README.md ./
+
+RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates chromium gcc gh git libpq-dev nodejs npm && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
+    pip install --no-cache-dir . && \
+    npm install --global "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" && \
+    ln -s "$(python -c 'from codex_cli_bin import bundled_codex_path; print(bundled_codex_path())')" \
+        /usr/local/bin/codex
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/factory-home \
+    CODEX_HOME=/factory-codex-home \
+    PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium \
+    PLAYWRIGHT_MCP_HEADLESS=true \
+    PLAYWRIGHT_MCP_NO_SANDBOX=true \
+    CRAWLER_FACTORY_REPOSITORY=https://github.com/druskacik/classical_sk_data_scraping.git
+
+VOLUME ["/var/lib/crawler-factory", "/factory-home", "/factory-codex-home"]
+
+CMD ["sh", "-c", "python -m automation.run_crawler_factory --repository \"$CRAWLER_FACTORY_REPOSITORY\""]

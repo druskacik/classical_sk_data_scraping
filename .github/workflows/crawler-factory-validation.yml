@@ -1,0 +1,51 @@
+name: Crawler factory validation
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  crawler-factory-validation:
+    name: crawler-factory-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.22"
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Validate generated crawler scope and live output
+        if: startsWith(github.head_ref, 'crawler-factory/')
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: uv run python automation/validate_crawler_pr.py --base-ref origin/master | tee crawler-factory-validation.json
+
+      - name: Compile Python sources
+        run: uv run python -m compileall -q automation build_crawlers_with_codex.py
+
+      - name: Run repository tests
+        run: uv run python -m unittest discover -s tests
+
+      - name: Upload crawler validation report
+        if: always() && startsWith(github.head_ref, 'crawler-factory/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: crawler-factory-validation
+          path: crawler-factory-validation.json
+          if-no-files-found: ignore
