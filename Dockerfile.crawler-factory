@@ -9,7 +9,7 @@ COPY pyproject.toml uv.lock README.md ./
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates chromium gcc gh git libpq-dev nodejs npm && \
+        build-essential ca-certificates chromium gh git libpq-dev nodejs npm && \
     rm -rf /var/lib/apt/lists/*
 
 COPY . .
