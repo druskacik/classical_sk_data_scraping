@@ -1,7 +1,3 @@
-# AGENTS.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 Data scraping pipeline for classical music events. Crawlers scrape concert listings from cultural websites, store them in a PostgreSQL database, use Gemini AI to classify broad-source events, and use the Codex SDK to extract concert programmes.
@@ -47,10 +43,10 @@ Package management uses `uv` (not pip).
 - `composer` — Composer registry
 - `classical_concert_composer` — Many-to-many join table
 
-### Environment variables (.env)
-
-`DB_NAME`, `DB_USER`, `DB_PASS`, `DB_HOST`, `DB_PORT`, `GEMINI_API_KEY`, `CODEX_HOME`
-
 ## Adding a new crawler
 
 Create `crawlers/<country_code>/<site_domain>/main.py` with a `main()` function. It will be auto-discovered by `main.py`. Use `upload_concerts()` for classical-only sources or `upload_potential_concerts()` for general sources. Set `CrawlerConfig.country_code` to an ISO 3166-1 alpha-2 code and save a CSV backup to `data/<site>.csv`.
+
+## General notes
+
+If I ask you to analyse the data, I mean to analyse the production database with the `agent_utils/search_db.py` script unless I tell you otherwise.
