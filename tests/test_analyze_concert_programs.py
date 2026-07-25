@@ -29,6 +29,9 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertIn("standard English title of the complete composition", prompt)
         self.assertIn("standard English name in programme_label", prompt)
         self.assertIn("original wording in evidence", prompt)
+        self.assertIn("Keep uncertainty local", prompt)
+        self.assertIn("Divertimento in D major (selection)", prompt)
+        self.assertIn("without a Köchel number", prompt)
         self.assertLess(prompt.index("URL: https://example.test/event"), prompt.index("fallback"))
 
     def test_no_program_result_must_not_include_program_entries(self):
@@ -39,18 +42,26 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "notes": "unclear",
             "composers": [],
             "program": [{"unexpected": "entry"}],
+            "unresolved_program": [],
         }
         with self.assertRaisesRegex(ValueError, "must not contain"):
             analyzer.validate_result(MagicMock(), concert, result)
 
-    def test_ambiguous_result_may_retain_candidates_without_validation(self):
+    def test_ambiguous_result_requires_only_unresolved_entries(self):
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
         result = {
             "status": "ambiguous",
             "source_url": "https://example.test",
             "notes": "unclear",
             "composers": [],
-            "program": [{"candidate": "retained for audit"}],
+            "program": [],
+            "unresolved_program": [
+                {
+                    "programme_label": "Prelude or Toccata",
+                    "evidence": "The page lists both alternatives.",
+                    "reason": "The performed alternative is not identified.",
+                }
+            ],
         }
         analyzer.validate_result(MagicMock(), concert, result)
 
@@ -62,6 +73,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "notes": "",
             "composers": [],
             "program": [],
+            "unresolved_program": [],
         }
         with self.assertRaisesRegex(ValueError, "at least one"):
             analyzer.validate_result(MagicMock(), concert, result)
@@ -78,6 +90,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertIn("c.date >= CURRENT_DATE", query)
         self.assertIn("a.attempts < %s", query)
         self.assertIn("make_interval(days => %s)", query)
+        self.assertIn("a.status IN ('no_program', 'partial', 'ambiguous')", query)
         self.assertEqual(
             cursor.execute.call_args.args[1],
             (
@@ -96,8 +109,28 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "notes": "Mozart works are not specified.",
             "composers": [],
             "program": [],
+            "unresolved_program": [],
         }
         with self.assertRaisesRegex(ValueError, "must contain composers"):
+            analyzer.validate_result(MagicMock(), concert, result)
+
+    def test_partial_requires_confident_and_unresolved_entries(self):
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        result = {
+            "status": "partial",
+            "source_url": concert.url,
+            "notes": "",
+            "composers": [{"existing_id": 1, "name": "Wolfgang Amadeus Mozart"}],
+            "program": [],
+            "unresolved_program": [
+                {
+                    "programme_label": "Divertimento in D major (selection)",
+                    "evidence": "The page lists the title without a Köchel number.",
+                    "reason": "Multiple Mozart divertimenti match.",
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "confident programme entries"):
             analyzer.validate_result(MagicMock(), concert, result)
 
     @patch.object(analyzer, "_resolve_composer", return_value=17)
@@ -111,6 +144,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "notes": "No works named.",
             "composers": [{"existing_id": 17, "name": "Wolfgang Amadeus Mozart"}],
             "program": [],
+            "unresolved_program": [],
         }
 
         analyzer.persist_result(conn, concert, result, "gpt-5.6-terra")
@@ -123,6 +157,101 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertIn("EXCLUDED.status = 'no_program'", upsert)
         conn.commit.assert_called_once()
 
+    @patch.object(analyzer, "_resolve_work", return_value=96)
+    @patch.object(analyzer, "_resolve_composer", return_value=1)
+    def test_partial_saves_confident_work_but_not_unresolved_mozart_divertimento(
+        self,
+        _resolve_composer,
+        resolve_work,
+    ):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = None
+        concert = analyzer.Concert(2392, "Vivaldi Four Seasons", date.today(), "https://example.test", None)
+        composer = {"existing_id": 1, "name": "Wolfgang Amadeus Mozart"}
+        result = {
+            "status": "partial",
+            "source_url": concert.url,
+            "notes": "One Mozart slot cannot be identified.",
+            "composers": [composer],
+            "program": [
+                {
+                    "composer": composer,
+                    "work": {
+                        "existing_id": 96,
+                        "title": "Exsultate, jubilate",
+                        "catalogue_number": "K. 165",
+                    },
+                    "programme_label": "Alleluia",
+                    "evidence": "The page names Exsultate, jubilate.",
+                }
+            ],
+            "unresolved_program": [
+                {
+                    "programme_label": "Divertimento in D major (selection)",
+                    "evidence": "The page gives no Köchel number.",
+                    "reason": "Multiple Mozart divertimenti in D major match.",
+                }
+            ],
+        }
+
+        analyzer.persist_result(conn, concert, result, "gpt-5.6-terra")
+
+        resolve_work.assert_called_once()
+        self.assertEqual(resolve_work.call_args.args[2]["title"], "Exsultate, jubilate")
+        work_inserts = [
+            call
+            for call in cursor.execute.call_args_list
+            if "INSERT INTO classical_concert_work" in call.args[0]
+        ]
+        self.assertEqual(len(work_inserts), 1)
+        self.assertEqual(work_inserts[0].args[1][2], "Alleluia")
+        analysis_upsert = next(
+            call for call in cursor.execute.call_args_list if "INSERT INTO concert_program_analysis" in call.args[0]
+        )
+        self.assertEqual(analysis_upsert.args[1][1], "partial")
+
+    def test_degraded_retry_preserves_existing_partial_result(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = ("partial",)
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        result = {
+            "status": "ambiguous",
+            "source_url": concert.url,
+            "notes": "The updated page is unclear.",
+            "composers": [],
+            "program": [],
+            "unresolved_program": [
+                {
+                    "programme_label": "Unclear selection",
+                    "evidence": "The page is unclear.",
+                    "reason": "No work is uniquely identified.",
+                }
+            ],
+        }
+
+        analyzer.persist_result(conn, concert, result, "gpt-5.6-terra")
+
+        executed = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertFalse(any("DELETE FROM classical_concert_work" in query for query in executed))
+        self.assertFalse(any("INSERT INTO concert_program_analysis" in query for query in executed))
+        update = next(query for query in executed if "UPDATE concert_program_analysis" in query)
+        self.assertIn("attempts = attempts + 1", update)
+        conn.commit.assert_called_once()
+
+    def test_error_retry_preserves_existing_partial_status(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+
+        analyzer.persist_error(conn, concert, "gpt-5.6-terra", RuntimeError("network error"))
+
+        upsert = cursor.execute.call_args.args[0]
+        self.assertIn("concert_program_analysis.status = 'partial'", upsert)
+        self.assertIn("THEN concert_program_analysis.model", upsert)
+        conn.commit.assert_called_once()
+
     def test_complete_requires_program_composers_in_top_level_list(self):
         conn = MagicMock()
         cursor = conn.cursor.return_value.__enter__.return_value
@@ -133,6 +262,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "source_url": concert.url,
             "notes": "",
             "composers": [{"existing_id": 1, "name": "Wolfgang Amadeus Mozart"}],
+            "unresolved_program": [],
             "program": [
                 {
                     "composer": {"existing_id": 2, "name": "Joseph Haydn"},
@@ -175,6 +305,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "source_url": " https://example.test/programme ",
             "notes": "",
             "composers": [composer],
+            "unresolved_program": [],
             "program": [
                 entry(31, "Twelve Pieces for Organ", "No. 8: Romance", "Lists No. 8."),
                 entry(31, "Twelve Pieces for Organ", "No. 11: Toccata", "Lists No. 11."),
@@ -218,6 +349,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
                 "notes": "No programme published.",
                 "composers": [],
                 "program": [],
+                "unresolved_program": [],
             }
         )
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
@@ -253,6 +385,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "notes": "",
             "composers": [],
             "program": [],
+            "unresolved_program": [],
         }
         codex_class.return_value.__enter__.return_value = MagicMock()
         with patch("sys.stdout", new_callable=io.StringIO):
@@ -266,11 +399,18 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
 
     def test_output_schema_enforces_paired_entities(self):
         self.assertIn("composer_only", analyzer.OUTPUT_SCHEMA["properties"]["status"]["enum"])
+        self.assertIn("partial", analyzer.OUTPUT_SCHEMA["properties"]["status"]["enum"])
         self.assertIn("composers", analyzer.OUTPUT_SCHEMA["required"])
+        self.assertIn("unresolved_program", analyzer.OUTPUT_SCHEMA["required"])
         item = analyzer.OUTPUT_SCHEMA["properties"]["program"]["items"]
         self.assertEqual(
             item["required"],
             ["composer", "work", "programme_label", "evidence"],
+        )
+        unresolved = analyzer.OUTPUT_SCHEMA["properties"]["unresolved_program"]["items"]
+        self.assertEqual(
+            unresolved["required"],
+            ["programme_label", "evidence", "reason"],
         )
 
     def test_model_validation_falls_back_to_local_catalogue(self):

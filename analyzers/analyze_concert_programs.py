@@ -34,7 +34,14 @@ OUTPUT_SCHEMA: dict[str, Any] = {
     "properties": {
         "status": {
             "type": "string",
-            "enum": ["complete", "composer_only", "ambiguous", "no_program", "page_unavailable"],
+            "enum": [
+                "complete",
+                "partial",
+                "composer_only",
+                "ambiguous",
+                "no_program",
+                "page_unavailable",
+            ],
         },
         "source_url": {"type": "string"},
         "notes": {"type": "string"},
@@ -81,8 +88,21 @@ OUTPUT_SCHEMA: dict[str, Any] = {
                 "required": ["composer", "work", "programme_label", "evidence"],
             },
         },
+        "unresolved_program": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "programme_label": {"type": "string"},
+                    "evidence": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["programme_label", "evidence", "reason"],
+            },
+        },
     },
-    "required": ["status", "source_url", "notes", "composers", "program"],
+    "required": ["status", "source_url", "notes", "composers", "program", "unresolved_program"],
 }
 
 
@@ -128,7 +148,7 @@ def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool
                 FROM classical_concert c
                 LEFT JOIN concert_program_analysis a ON a.classical_concert_id = c.id
                 WHERE c.id = ANY(%s)
-                  AND (%s OR a.status IS NULL OR a.status NOT IN ('complete', 'composer_only', 'ambiguous', 'expired_no_program', 'failed'))
+                  AND (%s OR a.status IS NULL OR a.status NOT IN ('complete', 'partial', 'composer_only', 'ambiguous', 'expired_no_program', 'failed'))
                 ORDER BY c.id
                 LIMIT %s
                 """,
@@ -145,7 +165,7 @@ def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool
                   AND (
                     a.id IS NULL
                     OR (
-                      a.status = 'no_program'
+                      a.status IN ('no_program', 'partial', 'ambiguous')
                       AND a.attempts < %s
                       AND a.last_attempted_at <= now() - make_interval(days => %s)
                     )
@@ -234,16 +254,32 @@ def validate_result(conn, concert: Concert, result: dict[str, Any]) -> None:
     status = result["status"]
     composers = result["composers"]
     program = result["program"]
+    unresolved_program = result["unresolved_program"]
     if status == "complete" and not program:
         raise ValueError("A complete result must contain at least one composer/work pair")
     if status == "complete" and not composers:
         raise ValueError("A complete result must contain its identified composers")
+    if status == "complete" and unresolved_program:
+        raise ValueError("A complete result must not contain unresolved programme entries")
+    if status == "partial" and (not composers or not program or not unresolved_program):
+        raise ValueError(
+            "A partial result must contain composers, confident programme entries, and unresolved entries"
+        )
+    if status == "ambiguous" and (program or not unresolved_program):
+        raise ValueError(
+            "An ambiguous result must contain unresolved entries and no confident programme entries"
+        )
     if status == "composer_only" and (not composers or program):
         raise ValueError("A composer_only result must contain composers and no programme entries")
     if status in {"no_program", "page_unavailable"} and (composers or program):
         raise ValueError(f"A {status} result must not contain catalogue entries")
+    if status in {"composer_only", "no_program", "page_unavailable"} and unresolved_program:
+        raise ValueError(f"A {status} result must not contain unresolved programme entries")
     if result["source_url"].strip() == "":
         raise ValueError("source_url must not be empty")
+    for entry in unresolved_program:
+        if not all(entry[field].strip() for field in ("programme_label", "evidence", "reason")):
+            raise ValueError("Unresolved programme fields must not be empty")
     if status in {"ambiguous", "no_program", "page_unavailable"}:
         return
     with conn.cursor() as cursor:
@@ -345,7 +381,7 @@ def replace_catalogue_links(cursor, concert_id: int, result: dict[str, Any]) -> 
             (concert_id, composer_id),
         )
 
-    if result["status"] != "complete":
+    if result["status"] not in {"complete", "partial"}:
         return
 
     grouped_works: dict[int, dict[str, list[str]]] = {}
@@ -379,10 +415,40 @@ def replace_catalogue_links(cursor, concert_id: int, result: dict[str, Any]) -> 
 
 def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -> None:
     status = result["status"]
-    completed = status in {"complete", "composer_only", "ambiguous", "expired_no_program", "failed"}
+    completed = status in {"complete", "composer_only", "expired_no_program", "failed"}
     try:
         with conn.cursor() as cursor:
-            if status in {"complete", "composer_only"}:
+            cursor.execute(
+                "SELECT status FROM concert_program_analysis WHERE classical_concert_id = %s",
+                (concert.id,),
+            )
+            existing = cursor.fetchone()
+            if (
+                existing
+                and existing[0] == "partial"
+                and status in {"ambiguous", "no_program", "page_unavailable"}
+            ):
+                cursor.execute(
+                    """
+                    UPDATE concert_program_analysis
+                    SET attempts = attempts + 1,
+                        last_error = %s,
+                        last_attempted_at = now(),
+                        completed_at = CASE
+                            WHEN attempts + 1 >= %s THEN now()
+                            ELSE completed_at
+                        END
+                    WHERE classical_concert_id = %s
+                    """,
+                    (
+                        f"Retry returned {status}: {result['notes']}",
+                        MAX_AUTOMATIC_ATTEMPTS,
+                        concert.id,
+                    ),
+                )
+                conn.commit()
+                return
+            if status in {"complete", "partial", "composer_only"}:
                 replace_catalogue_links(cursor, concert.id, result)
             cursor.execute(
                 """
@@ -405,6 +471,8 @@ def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -
                          AND concert_program_analysis.attempts + 1 >= %s THEN now()
                         WHEN EXCLUDED.status = 'no_program'
                          AND concert_program_analysis.attempts + 1 >= %s THEN now()
+                        WHEN EXCLUDED.status IN ('partial', 'ambiguous')
+                         AND concert_program_analysis.attempts + 1 >= %s THEN now()
                         ELSE EXCLUDED.completed_at
                     END
                 """,
@@ -414,6 +482,7 @@ def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -
                     model,
                     Json(result, dumps=lambda value: json.dumps(value, ensure_ascii=False)),
                     completed,
+                    MAX_AUTOMATIC_ATTEMPTS,
                     MAX_AUTOMATIC_ATTEMPTS,
                     MAX_AUTOMATIC_ATTEMPTS,
                     MAX_AUTOMATIC_ATTEMPTS,
@@ -433,9 +502,17 @@ def persist_error(conn, concert: Concert, model: str, error: Exception) -> None:
                 (classical_concert_id, status, attempts, model, last_error, last_attempted_at)
             VALUES (%s, 'error', 1, %s, %s, now())
             ON CONFLICT (classical_concert_id) DO UPDATE SET
-                status = CASE WHEN concert_program_analysis.attempts + 1 >= %s THEN 'failed' ELSE 'error' END,
+                status = CASE
+                    WHEN concert_program_analysis.status = 'partial' THEN 'partial'
+                    WHEN concert_program_analysis.attempts + 1 >= %s THEN 'failed'
+                    ELSE 'error'
+                END,
                 attempts = concert_program_analysis.attempts + 1,
-                model = EXCLUDED.model,
+                model = CASE
+                    WHEN concert_program_analysis.status = 'partial'
+                    THEN concert_program_analysis.model
+                    ELSE EXCLUDED.model
+                END,
                 last_error = EXCLUDED.last_error,
                 last_attempted_at = now(),
                 completed_at = CASE WHEN concert_program_analysis.attempts + 1 >= %s THEN now() ELSE NULL END
