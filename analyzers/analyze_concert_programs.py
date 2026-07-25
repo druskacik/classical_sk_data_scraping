@@ -317,53 +317,73 @@ def _resolve_work(cursor, composer_id: int, work: dict[str, Any]) -> int:
     return cursor.fetchone()[0]
 
 
+def _append_distinct(values: list[str], value: str) -> None:
+    stripped = value.strip()
+    if stripped not in values:
+        values.append(stripped)
+
+
+def replace_catalogue_links(cursor, concert_id: int, result: dict[str, Any]) -> None:
+    cursor.execute(
+        "DELETE FROM classical_concert_work WHERE classical_concert_id = %s",
+        (concert_id,),
+    )
+    cursor.execute(
+        "DELETE FROM classical_concert_composer WHERE classical_concert_id = %s",
+        (concert_id,),
+    )
+
+    composer_ids = {}
+    for composer in result["composers"]:
+        composer_id = _resolve_composer(cursor, composer)
+        composer_ids[_composer_identity(composer)] = composer_id
+        cursor.execute(
+            """
+            INSERT INTO classical_concert_composer (classical_concert_id, composer_id)
+            VALUES (%s, %s) ON CONFLICT DO NOTHING
+            """,
+            (concert_id, composer_id),
+        )
+
+    if result["status"] != "complete":
+        return
+
+    grouped_works: dict[int, dict[str, list[str]]] = {}
+    for entry in result["program"]:
+        composer_id = composer_ids[_composer_identity(entry["composer"])]
+        work_id = _resolve_work(cursor, composer_id, entry["work"])
+        grouped = grouped_works.setdefault(work_id, {"labels": [], "evidence": []})
+        _append_distinct(grouped["labels"], entry["programme_label"])
+        _append_distinct(grouped["evidence"], entry["evidence"])
+
+    for work_id, grouped in grouped_works.items():
+        cursor.execute(
+            """
+            INSERT INTO classical_concert_work
+                (classical_concert_id, work_id, programme_label, source_url, evidence)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (classical_concert_id, work_id) DO UPDATE SET
+                programme_label = EXCLUDED.programme_label,
+                source_url = EXCLUDED.source_url,
+                evidence = EXCLUDED.evidence
+            """,
+            (
+                concert_id,
+                work_id,
+                "; ".join(grouped["labels"]),
+                result["source_url"].strip(),
+                "\n".join(grouped["evidence"]),
+            ),
+        )
+
+
 def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -> None:
     status = result["status"]
     completed = status in {"complete", "composer_only", "ambiguous", "expired_no_program", "failed"}
     try:
         with conn.cursor() as cursor:
             if status in {"complete", "composer_only"}:
-                cursor.execute(
-                    "DELETE FROM classical_concert_work WHERE classical_concert_id = %s",
-                    (concert.id,),
-                )
-                cursor.execute(
-                    "DELETE FROM classical_concert_composer WHERE classical_concert_id = %s",
-                    (concert.id,),
-                )
-                composer_ids = {}
-                for composer in result["composers"]:
-                    composer_id = _resolve_composer(cursor, composer)
-                    composer_ids[_composer_identity(composer)] = composer_id
-                    cursor.execute(
-                        """
-                        INSERT INTO classical_concert_composer (classical_concert_id, composer_id)
-                        VALUES (%s, %s) ON CONFLICT DO NOTHING
-                        """,
-                        (concert.id, composer_id),
-                    )
-            if status == "complete":
-                for entry in result["program"]:
-                    composer_id = composer_ids[_composer_identity(entry["composer"])]
-                    work_id = _resolve_work(cursor, composer_id, entry["work"])
-                    cursor.execute(
-                        """
-                        INSERT INTO classical_concert_work
-                            (classical_concert_id, work_id, programme_label, source_url, evidence)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (classical_concert_id, work_id) DO UPDATE SET
-                            programme_label = EXCLUDED.programme_label,
-                            source_url = EXCLUDED.source_url,
-                            evidence = EXCLUDED.evidence
-                        """,
-                        (
-                            concert.id,
-                            work_id,
-                            entry["programme_label"].strip(),
-                            result["source_url"].strip(),
-                            entry["evidence"].strip(),
-                        ),
-                    )
+                replace_catalogue_links(cursor, concert.id, result)
             cursor.execute(
                 """
                 INSERT INTO concert_program_analysis

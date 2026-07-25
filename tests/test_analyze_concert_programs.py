@@ -146,6 +146,67 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "top-level composers"):
             analyzer.validate_result(conn, concert, result)
 
+    @patch.object(analyzer, "_resolve_work", side_effect=[31, 31, 31, 44])
+    @patch.object(analyzer, "_resolve_composer", return_value=17)
+    def test_complete_aggregates_distinct_excerpts_by_canonical_work(
+        self,
+        _resolve_composer,
+        _resolve_work,
+    ):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        composer = {"existing_id": 17, "name": "Max Reger"}
+
+        def entry(work_id, title, label, evidence):
+            return {
+                "composer": composer,
+                "work": {
+                    "existing_id": work_id,
+                    "title": title,
+                    "catalogue_number": None,
+                },
+                "programme_label": label,
+                "evidence": evidence,
+            }
+
+        result = {
+            "status": "complete",
+            "source_url": " https://example.test/programme ",
+            "notes": "",
+            "composers": [composer],
+            "program": [
+                entry(31, "Twelve Pieces for Organ", "No. 8: Romance", "Lists No. 8."),
+                entry(31, "Twelve Pieces for Organ", "No. 11: Toccata", "Lists No. 11."),
+                entry(31, "Twelve Pieces for Organ", "No. 11: Toccata", "Lists No. 11."),
+                entry(44, "Ave Maria", "Ave Maria", "Lists Ave Maria."),
+            ],
+        }
+
+        analyzer.persist_result(conn, concert, result, "gpt-5.6-terra")
+
+        work_inserts = [
+            call
+            for call in cursor.execute.call_args_list
+            if "INSERT INTO classical_concert_work" in call.args[0]
+        ]
+        self.assertEqual(len(work_inserts), 2)
+        self.assertEqual(
+            work_inserts[0].args[1],
+            (
+                1,
+                31,
+                "No. 8: Romance; No. 11: Toccata",
+                "https://example.test/programme",
+                "Lists No. 8.\nLists No. 11.",
+            ),
+        )
+        self.assertEqual(
+            work_inserts[1].args[1],
+            (1, 44, "Ave Maria", "https://example.test/programme", "Lists Ave Maria."),
+        )
+        conn.commit.assert_called_once()
+
     def test_agent_threads_are_persistent(self):
         codex = MagicMock()
         thread = codex.thread_start.return_value
