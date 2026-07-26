@@ -8,15 +8,19 @@ from pathlib import Path
 from automation.run_crawler_factory import (
     crawler_directory,
     load_state,
+    normalize_blocked_metadata,
     select_urls,
     validate_change_scope,
 )
 from automation.validate_crawler_pr import (
     PullRequestValidationError,
     generated_directories,
+    is_transient_failure,
 )
 from automation.validate_generated_crawler import (
     ValidationError,
+    _validate_records,
+    canonical_source_url,
     parse_blocked_metadata,
     validate_blocked,
 )
@@ -68,6 +72,87 @@ class BlockedMetadataTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValidationError, "exactly 30 days"):
                 parse_blocked_metadata(path)
+
+    def test_worker_normalizes_blocked_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            url = "https://www.hamu.cz/"
+            path = workspace / crawler_directory(url) / "BLOCKED.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                "<!-- crawler-factory-metadata\n"
+                '{"url":"https://hamu.cz","country_code":"CZ",'
+                '"reason_code":"no_current_events","attempted_at":"2020-01-01",'
+                '"retry_after":"2020-02-01"}\n'
+                "-->\n\nThe source currently publishes no concerts.\n",
+                encoding="utf-8",
+            )
+            attempted = date(2026, 7, 25)
+
+            normalize_blocked_metadata(workspace, url, "CZ", attempted)
+            metadata = parse_blocked_metadata(path)
+
+        self.assertEqual(metadata["url"], url)
+        self.assertEqual(metadata["attempted_at"], "2026-07-25")
+        self.assertEqual(metadata["retry_after"], "2026-08-24")
+
+
+class CrawlerValidationTests(unittest.TestCase):
+    def test_source_url_canonicalization(self):
+        self.assertEqual(
+            canonical_source_url("https://www.bachcollegium.cz/"),
+            canonical_source_url("http://bachcollegium.cz"),
+        )
+        self.assertNotEqual(
+            canonical_source_url("https://salvator.farnost.cz/"),
+            canonical_source_url("https://farnostsalvator.cz/"),
+        )
+
+    def test_configured_deduplication_runs_before_duplicate_validation(self):
+        import pandas as pd
+
+        class Config:
+            front_fields = [
+                ("source", "Example"),
+                ("source_url", "https://example.cz"),
+            ]
+            country_code = "CZ"
+            dedupe_subset = ["title", "date", "time_from"]
+
+        class Crawler:
+            config = Config()
+
+            @staticmethod
+            def build_dataframe(records):
+                return pd.DataFrame(records)
+
+            @staticmethod
+            def transform(frame):
+                return frame
+
+        record = {
+            "title": "Concert",
+            "date": "2026-08-01",
+            "time_from": "19:00",
+            "url": "https://example.cz/concert",
+        }
+
+        normalized = _validate_records([record, record.copy()], Crawler(), "https://example.cz", "CZ")
+
+        self.assertEqual(len(normalized), 1)
+
+    def test_short_but_meaningful_blocked_explanation_is_allowed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "BLOCKED.md"
+            path.write_text(
+                blocked_text("https://example.cz/", "CZ", date.today()).split("# Blocked")[0]
+                + "# Blocked\n\nNo concerts are currently published.\n",
+                encoding="utf-8",
+            )
+
+            result = validate_blocked(path, "https://www.example.cz", "CZ")
+
+        self.assertEqual(result["status"], "blocked")
 
 
 class SelectionTests(unittest.TestCase):
@@ -225,6 +310,12 @@ class PullRequestScopeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(PullRequestValidationError, "existing crawler"):
                 generated_directories(workspace, "master")
+
+    def test_only_transient_failures_are_retried(self):
+        self.assertTrue(is_transient_failure({"error": "ReadTimeout: source was slow"}))
+        self.assertFalse(
+            is_transient_failure({"error": "ValidationError: country_code does not match"})
+        )
 
 
 if __name__ == "__main__":

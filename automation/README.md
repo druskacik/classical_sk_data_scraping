@@ -6,6 +6,9 @@ temporary directory, attempts at most five hardcoded URLs, commits validated
 auto-merge. Codex runs with the workspace-write sandbox inside that disposable
 clone; the local builder retains its existing full-access default.
 
+Live validation defaults to 300 seconds per crawler and can be changed with
+`--validation-timeout-seconds`.
+
 ## Build and configure
 
 ```bash

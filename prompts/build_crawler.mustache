@@ -38,8 +38,9 @@ If it is not possible to build a working crawler after investigating API and HTM
 
 Also use `BLOCKED.md` when the source currently exposes no concerts, even if
 this appears seasonal. Start `BLOCKED.md` with exactly this metadata block,
-using current UTC dates and one of `no_current_events`, `access_blocked`,
-`no_parseable_source`, or `implementation_failed` as the reason code:
+using one of `no_current_events`, `access_blocked`, `no_parseable_source`, or
+`implementation_failed` as the reason code. The outer worker will normalize
+the URL, country, attempt date, and retry date before validation:
 
 <!-- crawler-factory-metadata
 {"url":"{{ url }}","country_code":"{{ country_code }}","reason_code":"no_current_events","attempted_at":"YYYY-MM-DD","retry_after":"YYYY-MM-DD"}

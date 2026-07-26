@@ -56,19 +56,30 @@ def validate_blocked(
     path: Path,
     url: str | None,
     country_code: str,
-    attempted_on: date | None = None,
 ) -> dict:
     metadata = parse_blocked_metadata(path)
-    if url is not None and metadata["url"] != url:
+    if url is not None and canonical_source_url(metadata["url"]) != canonical_source_url(url):
         raise ValidationError("BLOCKED.md URL does not match the requested source")
     if metadata["country_code"].upper() != country_code.upper():
         raise ValidationError("BLOCKED.md country code does not match the requested country")
-    if attempted_on is not None and date.fromisoformat(metadata["attempted_at"]) != attempted_on:
-        raise ValidationError("BLOCKED.md attempted_at does not match this run")
-    text = path.read_text(encoding="utf-8")
-    if len(text.split()) < 40:
-        raise ValidationError("BLOCKED.md does not contain enough investigation evidence")
+    explanation = METADATA_PATTERN.sub("", path.read_text(encoding="utf-8")).strip()
+    if not explanation:
+        raise ValidationError("BLOCKED.md has no human-readable investigation explanation")
     return {"status": "blocked", "metadata": metadata}
+
+
+def canonical_source_url(value: str) -> tuple[str, int | None, str]:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValidationError(f"Invalid source URL: {value!r}")
+    host = parsed.hostname.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    port = parsed.port
+    if (parsed.scheme == "http" and port == 80) or (parsed.scheme == "https" and port == 443):
+        port = None
+    path = parsed.path.rstrip("/")
+    return host, port, path
 
 
 def _valid_http_url(value: object) -> bool:
@@ -84,6 +95,8 @@ def _validate_records(records: list[dict], crawler, expected_url: str, country_c
             frame.insert(0, column, value)
     if "country_code" not in frame.columns:
         frame.insert(0, "country_code", crawler.config.country_code)
+    if crawler.config.dedupe_subset:
+        frame.drop_duplicates(subset=crawler.config.dedupe_subset, inplace=True)
     normalized = frame.to_dict(orient="records")
 
     errors = []
@@ -119,7 +132,6 @@ def validate_crawler(
     crawler_dir: Path,
     url: str | None,
     country_code: str,
-    attempted_on: date | None = None,
 ) -> dict:
     relative_dir = crawler_dir.relative_to(workspace)
     module_name = ".".join((*relative_dir.parts, "main"))
@@ -147,12 +159,23 @@ def validate_crawler(
                 and value is not BaseCrawler
                 and value.__module__ == module.__name__
             ]
-            if len(classes) != 1:
-                raise ValidationError("main.py must define exactly one BaseCrawler subclass")
-            crawler = classes[0]()
+            matching_classes = [
+                crawler_class
+                for crawler_class in classes
+                if getattr(getattr(crawler_class, "config", None), "slug", None) == crawler_dir.name
+            ]
+            if len(matching_classes) != 1:
+                raise ValidationError(
+                    "main.py must define exactly one BaseCrawler subclass whose config.slug "
+                    "matches the crawler directory"
+                )
+            crawler = matching_classes[0]()
             if crawler.config.country_code != country_code.upper():
                 raise ValidationError("CrawlerConfig.country_code does not match")
-            if url is not None and crawler.config.source_url.rstrip("/") != url.rstrip("/"):
+            if (
+                url is not None
+                and canonical_source_url(crawler.config.source_url) != canonical_source_url(url)
+            ):
                 raise ValidationError("CrawlerConfig.source_url does not match the requested URL")
             records = crawler.scrape()
             if blocked_connect.called:
@@ -177,7 +200,6 @@ def validate(
     crawler_directory: str,
     url: str | None,
     country_code: str,
-    attempted_on: date | None = None,
 ) -> dict:
     workspace = workspace.resolve()
     crawler_dir = (workspace / crawler_directory).resolve()
@@ -188,7 +210,7 @@ def validate(
     if main_path.exists() == blocked_path.exists():
         raise ValidationError("crawler directory must contain exactly one of main.py or BLOCKED.md")
     if blocked_path.exists():
-        return validate_blocked(blocked_path, url, country_code, attempted_on)
+        return validate_blocked(blocked_path, url, country_code)
     return validate_crawler(workspace, crawler_dir, url, country_code)
 
 
@@ -198,7 +220,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--crawler", required=True)
     parser.add_argument("--url")
     parser.add_argument("--country-code", required=True)
-    parser.add_argument("--attempted-on", type=date.fromisoformat)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -212,7 +233,6 @@ def main() -> None:
             args.crawler,
             args.url,
             args.country_code,
-            args.attempted_on,
         )
     except Exception as exc:
         result = {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}

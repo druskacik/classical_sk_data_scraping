@@ -14,7 +14,11 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from build_crawlers_with_codex import MODEL, URLS, country_code_for_url, crawler_folder_name
-from automation.validate_generated_crawler import parse_blocked_metadata
+from automation.validate_generated_crawler import (
+    ALLOWED_REASON_CODES,
+    METADATA_PATTERN,
+    parse_blocked_metadata,
+)
 
 
 DEFAULT_STATE_PATH = Path("/var/lib/crawler-factory/state.json")
@@ -177,6 +181,45 @@ def write_empty_blocked(workspace: Path, url: str, country_code: str) -> None:
     (directory / "BLOCKED.md").write_text(content, encoding="utf-8")
 
 
+def normalize_blocked_metadata(
+    workspace: Path,
+    url: str,
+    country_code: str,
+    attempted: date,
+) -> None:
+    path = workspace / crawler_directory(url) / "BLOCKED.md"
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    match = METADATA_PATTERN.search(text)
+    existing = {}
+    if match:
+        try:
+            existing = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            existing = {}
+    reason_code = existing.get("reason_code", "implementation_failed")
+    if reason_code not in ALLOWED_REASON_CODES:
+        reason_code = "implementation_failed"
+    metadata = {
+        "url": url,
+        "country_code": country_code.upper(),
+        "reason_code": reason_code,
+        "attempted_at": attempted.isoformat(),
+        "retry_after": (attempted + timedelta(days=30)).isoformat(),
+    }
+    block = (
+        "<!-- crawler-factory-metadata\n"
+        f"{json.dumps(metadata, separators=(',', ':'))}\n"
+        "-->"
+    )
+    if match:
+        text = f"{text[:match.start()]}{block}{text[match.end():]}"
+    else:
+        text = f"{block}\n\n{text}"
+    path.write_text(text, encoding="utf-8")
+
+
 def git_commit(workspace: Path, url: str, status: str) -> str:
     directory = crawler_directory(url)
     run_command(["git", "add", "--", str(directory)], cwd=workspace)
@@ -194,6 +237,7 @@ def attempt_url(
     run_dir: Path,
     url: str,
     timeout_minutes: int,
+    validation_timeout_seconds: int,
     child_env: dict[str, str],
 ) -> dict:
     started = time.monotonic()
@@ -237,6 +281,12 @@ def attempt_url(
             result["error"] = f"builder exited with status {generation.returncode}"
             return result
         validate_change_scope(workspace, crawler_directory(url))
+        normalize_blocked_metadata(
+            workspace,
+            url,
+            country_code_for_url(url),
+            datetime.now(timezone.utc).date(),
+        )
         try:
             validation = run_command(
                 [
@@ -250,19 +300,19 @@ def attempt_url(
                     url,
                     "--country-code",
                     country_code_for_url(url),
-                    "--attempted-on",
-                    datetime.now(timezone.utc).date().isoformat(),
                     "--output",
                     str(validator_report),
                 ],
                 cwd=workspace,
                 env=child_env,
-                timeout=120,
+                timeout=validation_timeout_seconds,
                 check=False,
             )
         except subprocess.TimeoutExpired:
             result["status"] = "validation_failed"
-            result["error"] = "crawler validation exceeded 120 seconds"
+            result["error"] = (
+                f"crawler validation exceeded {validation_timeout_seconds} seconds"
+            )
             return result
         (run_dir / f"{slug}-validator.log").write_text(
             validation.stdout + validation.stderr,
@@ -329,6 +379,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-branch", default="master")
     parser.add_argument("--max-urls", type=int, default=5)
     parser.add_argument("--timeout-minutes", type=int, default=30)
+    parser.add_argument("--validation-timeout-seconds", type=int, default=300)
     parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE_PATH)
     parser.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS_DIR)
     parser.add_argument("--url", action="append", dest="urls")
@@ -340,6 +391,8 @@ def parse_args() -> argparse.Namespace:
 def run_factory(args: argparse.Namespace) -> None:
     if args.max_urls < 1:
         raise SystemExit("--max-urls must be at least 1")
+    if args.validation_timeout_seconds < 1:
+        raise SystemExit("--validation-timeout-seconds must be at least 1")
     run_id = f"{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:8]}"
     run_dir = args.runs_dir / run_id
     run_dir.mkdir(parents=True)
@@ -371,7 +424,14 @@ def run_factory(args: argparse.Namespace) -> None:
         candidates = select_urls(args.urls or URLS, workspace, state, today, args.max_urls)
         child_env = sanitized_child_env(run_dir)
         for url in candidates:
-            result = attempt_url(workspace, run_dir, url, args.timeout_minutes, child_env)
+            result = attempt_url(
+                workspace,
+                run_dir,
+                url,
+                args.timeout_minutes,
+                args.validation_timeout_seconds,
+                child_env,
+            )
             results.append(result)
             if result["status"] in {"generated", "blocked"}:
                 state["urls"].pop(url, None)

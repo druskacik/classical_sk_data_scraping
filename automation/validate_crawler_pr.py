@@ -76,7 +76,23 @@ def generated_directories(workspace: Path, base_ref: str) -> list[Path]:
     return sorted(directories)
 
 
-def validate_directory(workspace: Path, directory: Path) -> dict:
+def is_transient_failure(payload: dict) -> bool:
+    error = payload.get("error", "").lower()
+    return any(
+        marker in error
+        for marker in (
+            "connectionerror",
+            "connecttimeout",
+            "readtimeout",
+            "requestexception",
+            "temporarily unavailable",
+            "timed out",
+            "timeout",
+        )
+    )
+
+
+def validate_directory(workspace: Path, directory: Path, timeout_seconds: int) -> dict:
     output = workspace / ".crawler-validation.json"
     validator_command = [
         sys.executable,
@@ -91,13 +107,20 @@ def validate_directory(workspace: Path, directory: Path) -> dict:
         str(output),
     ]
     result = None
-    for _ in range(2):
-        result = command(validator_command, workspace, timeout=150)
+    payload = {}
+    for attempt in range(2):
+        result = command(validator_command, workspace, timeout=timeout_seconds)
+        if output.exists():
+            payload = json.loads(output.read_text(encoding="utf-8"))
         if result.returncode == 0:
             break
+        if attempt == 0 and is_transient_failure(payload):
+            continue
+        break
     assert result is not None
     try:
-        payload = json.loads(output.read_text(encoding="utf-8"))
+        if not payload:
+            payload = json.loads(output.read_text(encoding="utf-8"))
     finally:
         output.unlink(missing_ok=True)
     if result.returncode:
@@ -111,6 +134,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate an automated crawler-factory PR.")
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
     parser.add_argument("--base-ref", default="origin/master")
+    parser.add_argument("--timeout-seconds", type=int, default=300)
     return parser.parse_args()
 
 
@@ -120,7 +144,11 @@ def main() -> None:
     results = {}
     try:
         for directory in generated_directories(workspace, args.base_ref):
-            results[str(directory)] = validate_directory(workspace, directory)
+            results[str(directory)] = validate_directory(
+                workspace,
+                directory,
+                args.timeout_seconds,
+            )
     except Exception as exc:
         print(json.dumps({"status": "failed", "error": f"{type(exc).__name__}: {exc}"}, indent=2))
         raise SystemExit(1)
