@@ -4,25 +4,22 @@ import tempfile
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
+import automation.run_crawler_factory as factory
 from automation.run_crawler_factory import (
+    attempt_url,
     crawler_directory,
     load_state,
     normalize_blocked_metadata,
+    parse_blocked_metadata,
     select_urls,
     validate_change_scope,
 )
 from automation.validate_crawler_pr import (
     PullRequestValidationError,
     generated_directories,
-    is_transient_failure,
-)
-from automation.validate_generated_crawler import (
-    ValidationError,
-    _validate_records,
-    canonical_source_url,
-    parse_blocked_metadata,
-    validate_blocked,
+    validate_directory,
 )
 
 
@@ -50,28 +47,9 @@ class BlockedMetadataTests(unittest.TestCase):
             today = date.today()
             path.write_text(blocked_text("https://example.cz/", "CZ", today), encoding="utf-8")
 
-            result = validate_blocked(path, "https://example.cz/", "CZ")
+            result = parse_blocked_metadata(path)
 
-        self.assertEqual(result["status"], "blocked")
-        self.assertEqual(result["metadata"]["retry_after"], (today + timedelta(days=30)).isoformat())
-
-    def test_invalid_retry_interval_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "BLOCKED.md"
-            metadata = {
-                "url": "https://example.cz/",
-                "country_code": "CZ",
-                "reason_code": "no_current_events",
-                "attempted_at": date.today().isoformat(),
-                "retry_after": (date.today() + timedelta(days=29)).isoformat(),
-            }
-            path.write_text(
-                f"<!-- crawler-factory-metadata\n{json.dumps(metadata)}\n-->\n",
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(ValidationError, "exactly 30 days"):
-                parse_blocked_metadata(path)
+        self.assertEqual(result["retry_after"], (today + timedelta(days=30)).isoformat())
 
     def test_worker_normalizes_blocked_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -95,64 +73,6 @@ class BlockedMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["url"], url)
         self.assertEqual(metadata["attempted_at"], "2026-07-25")
         self.assertEqual(metadata["retry_after"], "2026-08-24")
-
-
-class CrawlerValidationTests(unittest.TestCase):
-    def test_source_url_canonicalization(self):
-        self.assertEqual(
-            canonical_source_url("https://www.bachcollegium.cz/"),
-            canonical_source_url("http://bachcollegium.cz"),
-        )
-        self.assertNotEqual(
-            canonical_source_url("https://salvator.farnost.cz/"),
-            canonical_source_url("https://farnostsalvator.cz/"),
-        )
-
-    def test_configured_deduplication_runs_before_duplicate_validation(self):
-        import pandas as pd
-
-        class Config:
-            front_fields = [
-                ("source", "Example"),
-                ("source_url", "https://example.cz"),
-            ]
-            country_code = "CZ"
-            dedupe_subset = ["title", "date", "time_from"]
-
-        class Crawler:
-            config = Config()
-
-            @staticmethod
-            def build_dataframe(records):
-                return pd.DataFrame(records)
-
-            @staticmethod
-            def transform(frame):
-                return frame
-
-        record = {
-            "title": "Concert",
-            "date": "2026-08-01",
-            "time_from": "19:00",
-            "url": "https://example.cz/concert",
-        }
-
-        normalized = _validate_records([record, record.copy()], Crawler(), "https://example.cz", "CZ")
-
-        self.assertEqual(len(normalized), 1)
-
-    def test_short_but_meaningful_blocked_explanation_is_allowed(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "BLOCKED.md"
-            path.write_text(
-                blocked_text("https://example.cz/", "CZ", date.today()).split("# Blocked")[0]
-                + "# Blocked\n\nNo concerts are currently published.\n",
-                encoding="utf-8",
-            )
-
-            result = validate_blocked(path, "https://www.example.cz", "CZ")
-
-        self.assertEqual(result["status"], "blocked")
 
 
 class SelectionTests(unittest.TestCase):
@@ -242,6 +162,89 @@ class ScopeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "outside the allowed scope"):
                 validate_change_scope(workspace, expected)
 
+    def test_main_and_blocked_together_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            expected = Path("crawlers/cz/example_cz")
+            directory = workspace / expected
+            directory.mkdir(parents=True)
+            (directory / "main.py").write_text("# generated\n", encoding="utf-8")
+            (directory / "BLOCKED.md").write_text("blocked\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "exactly one"):
+                validate_change_scope(workspace, expected)
+
+
+class AttemptTests(unittest.TestCase):
+    def test_nonzero_builder_result_is_preserved_when_scope_is_valid(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            run_dir = root / "runs"
+            workspace.mkdir()
+            run_dir.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            original_run_command = factory.run_command
+
+            def fake_run_command(command, **kwargs):
+                if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
+                    path = workspace / crawler_directory("https://www.hamu.cz/") / "main.py"
+                    path.parent.mkdir(parents=True)
+                    path.write_text("# useful partial result\n", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 1, "", "builder failed")
+                return original_run_command(command, **kwargs)
+
+            with (
+                patch.object(factory, "run_command", side_effect=fake_run_command),
+                patch.object(factory, "git_commit", return_value="abc123"),
+            ):
+                result = attempt_url(
+                    workspace,
+                    run_dir,
+                    "https://www.hamu.cz/",
+                    30,
+                    {},
+                )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["commit"], "abc123")
+        self.assertEqual(result["generation_warning"], "builder exited with status 1")
+
+    def test_timed_out_builder_result_is_preserved_when_scope_is_valid(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            run_dir = root / "runs"
+            workspace.mkdir()
+            run_dir.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            original_run_command = factory.run_command
+
+            def fake_run_command(command, **kwargs):
+                if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
+                    path = workspace / crawler_directory("https://www.hamu.cz/") / "main.py"
+                    path.parent.mkdir(parents=True)
+                    path.write_text("# useful partial result\n", encoding="utf-8")
+                    raise subprocess.TimeoutExpired(command, 60, output="partial log\n")
+                return original_run_command(command, **kwargs)
+
+            with (
+                patch.object(factory, "run_command", side_effect=fake_run_command),
+                patch.object(factory, "git_commit", return_value="abc123"),
+            ):
+                result = attempt_url(
+                    workspace,
+                    run_dir,
+                    "https://www.hamu.cz/",
+                    1,
+                    {},
+                )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["commit"], "abc123")
+        self.assertEqual(result["generation_warning"], "builder exceeded 1 minute")
+
 
 class PullRequestScopeTests(unittest.TestCase):
     def initialize_repository(self, workspace: Path) -> None:
@@ -311,11 +314,43 @@ class PullRequestScopeTests(unittest.TestCase):
             with self.assertRaisesRegex(PullRequestValidationError, "existing crawler"):
                 generated_directories(workspace, "master")
 
-    def test_only_transient_failures_are_retried(self):
-        self.assertTrue(is_transient_failure({"error": "ReadTimeout: source was slow"}))
-        self.assertFalse(
-            is_transient_failure({"error": "ValidationError: country_code does not match"})
-        )
+    def test_valid_python_is_compiled_without_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            directory = Path("crawlers/cz/example_cz")
+            main_path = workspace / directory / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text(
+                "raise RuntimeError('must not execute')\n",
+                encoding="utf-8",
+            )
+
+            result = validate_directory(workspace, directory)
+
+        self.assertEqual(result, {"status": "passed", "kind": "crawler"})
+
+    def test_invalid_python_syntax_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            directory = Path("crawlers/cz/example_cz")
+            main_path = workspace / directory / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text("def broken(:\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(PullRequestValidationError, "invalid Python syntax"):
+                validate_directory(workspace, directory)
+
+    def test_blocked_result_does_not_require_live_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            directory = Path("crawlers/cz/example_cz")
+            blocked_path = workspace / directory / "BLOCKED.md"
+            blocked_path.parent.mkdir(parents=True)
+            blocked_path.write_text("Temporarily unavailable.\n", encoding="utf-8")
+
+            result = validate_directory(workspace, directory)
+
+        self.assertEqual(result, {"status": "passed", "kind": "blocked"})
 
 
 if __name__ == "__main__":

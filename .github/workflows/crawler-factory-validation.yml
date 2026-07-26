@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Validate generated crawler scope and live output
+      - name: Validate generated crawler safety and syntax
         if: startsWith(github.head_ref, 'crawler-factory/')
         env:
           PYTHONDONTWRITEBYTECODE: "1"

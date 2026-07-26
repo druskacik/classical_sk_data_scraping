@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -14,15 +15,18 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from build_crawlers_with_codex import MODEL, URLS, country_code_for_url, crawler_folder_name
-from automation.validate_generated_crawler import (
-    ALLOWED_REASON_CODES,
-    METADATA_PATTERN,
-    parse_blocked_metadata,
-)
-
-
 DEFAULT_STATE_PATH = Path("/var/lib/crawler-factory/state.json")
 DEFAULT_RUNS_DIR = Path("/var/lib/crawler-factory/runs")
+METADATA_PATTERN = re.compile(
+    r"<!-- crawler-factory-metadata\s*(\{.*?\})\s*-->",
+    re.DOTALL,
+)
+ALLOWED_REASON_CODES = {
+    "no_current_events",
+    "access_blocked",
+    "no_parseable_source",
+    "implementation_failed",
+}
 ALLOWED_CHILD_ENV = {
     "CODEX_BIN",
     "CODEX_HOME",
@@ -81,6 +85,17 @@ def save_state(path: Path, state: dict) -> None:
 
 def crawler_directory(url: str) -> Path:
     return Path("crawlers") / country_code_for_url(url).lower() / crawler_folder_name(url)
+
+
+def parse_blocked_metadata(path: Path) -> dict:
+    match = METADATA_PATTERN.search(path.read_text(encoding="utf-8"))
+    if not match:
+        raise ValueError("BLOCKED.md has no crawler-factory metadata block")
+    metadata = json.loads(match.group(1))
+    required = {"url", "country_code", "reason_code", "attempted_at", "retry_after"}
+    if not required.issubset(metadata):
+        raise ValueError("BLOCKED.md metadata is incomplete")
+    return metadata
 
 
 def is_due(url: str, workspace: Path, state: dict, today: date) -> bool:
@@ -147,38 +162,10 @@ def validate_change_scope(workspace: Path, expected_directory: Path) -> None:
         raise RuntimeError("Codex produced no repository changes")
     if unexpected:
         raise RuntimeError(f"Codex changed files outside the allowed scope: {unexpected}")
-
-
-def write_empty_blocked(workspace: Path, url: str, country_code: str) -> None:
-    directory = workspace / crawler_directory(url)
-    if directory.exists():
-        shutil.rmtree(directory)
-    directory.mkdir(parents=True)
-    attempted = datetime.now(timezone.utc).date()
-    metadata = {
-        "url": url,
-        "country_code": country_code,
-        "reason_code": "no_current_events",
-        "attempted_at": attempted.isoformat(),
-        "retry_after": (attempted + timedelta(days=30)).isoformat(),
-    }
-    content = (
-        "<!-- crawler-factory-metadata\n"
-        f"{json.dumps(metadata, separators=(',', ':'))}\n"
-        "-->\n\n"
-        "# Temporarily blocked: no current concerts\n\n"
-        f"Source investigated: {url}\n\n"
-        "The crawler factory found a structurally usable source, but its live scrape returned "
-        "zero concerts on the attempt date. This is treated as a seasonal or temporarily empty "
-        "source rather than merged as an unverified crawler.\n\n"
-        "Codex investigated the site's public API/network responses and its rendered HTML. "
-        "No current concert records were available to validate required fields, pagination, "
-        "detail-page extraction, or programme descriptions against real data.\n\n"
-        "A later run should repeat both the API/network and HTML investigation. Publication of "
-        "the venue's next season, or any live event containing a title, date, venue, URL, and "
-        "programme description, would unblock implementation and end-to-end validation.\n"
-    )
-    (directory / "BLOCKED.md").write_text(content, encoding="utf-8")
+    main_path = workspace / expected_directory / "main.py"
+    blocked_path = workspace / expected_directory / "BLOCKED.md"
+    if main_path.exists() == blocked_path.exists():
+        raise RuntimeError("Codex must produce exactly one of main.py or BLOCKED.md")
 
 
 def normalize_blocked_metadata(
@@ -237,19 +224,18 @@ def attempt_url(
     run_dir: Path,
     url: str,
     timeout_minutes: int,
-    validation_timeout_seconds: int,
     child_env: dict[str, str],
 ) -> dict:
     started = time.monotonic()
     slug = crawler_folder_name(url)
     builder_report = run_dir / f"{slug}-builder.json"
-    validator_report = run_dir / f"{slug}-validator.json"
     result = {
         "url": url,
         "crawler_directory": str(crawler_directory(url)),
         "status": "generation_failed",
-        "validation": None,
         "commit": None,
+        "generation_warning": None,
+        "final_response": None,
         "error": None,
     }
     command = [
@@ -266,20 +252,34 @@ def attempt_url(
         str(builder_report),
     ]
     try:
-        generation = run_command(
-            command,
-            cwd=workspace,
-            env=child_env,
-            timeout=timeout_minutes * 60,
-            check=False,
-        )
-        (run_dir / f"{slug}-builder.log").write_text(
-            generation.stdout + generation.stderr,
-            encoding="utf-8",
-        )
-        if generation.returncode != 0:
-            result["error"] = f"builder exited with status {generation.returncode}"
-            return result
+        try:
+            generation = run_command(
+                command,
+                cwd=workspace,
+                env=child_env,
+                timeout=timeout_minutes * 60,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            output_parts = []
+            for part in (exc.stdout, exc.stderr):
+                if isinstance(part, bytes):
+                    part = part.decode(errors="replace")
+                if part:
+                    output_parts.append(part)
+            output = "".join(output_parts)
+            (run_dir / f"{slug}-builder.log").write_text(output, encoding="utf-8")
+            unit = "minute" if timeout_minutes == 1 else "minutes"
+            result["generation_warning"] = f"builder exceeded {timeout_minutes} {unit}"
+        else:
+            (run_dir / f"{slug}-builder.log").write_text(
+                generation.stdout + generation.stderr,
+                encoding="utf-8",
+            )
+            if generation.returncode != 0:
+                result["generation_warning"] = (
+                    f"builder exited with status {generation.returncode}"
+                )
         validate_change_scope(workspace, crawler_directory(url))
         normalize_blocked_metadata(
             workspace,
@@ -287,54 +287,21 @@ def attempt_url(
             country_code_for_url(url),
             datetime.now(timezone.utc).date(),
         )
-        try:
-            validation = run_command(
-                [
-                    sys.executable,
-                    str(workspace / "automation/validate_generated_crawler.py"),
-                    "--workspace",
-                    str(workspace),
-                    "--crawler",
-                    str(crawler_directory(url)),
-                    "--url",
-                    url,
-                    "--country-code",
-                    country_code_for_url(url),
-                    "--output",
-                    str(validator_report),
-                ],
-                cwd=workspace,
-                env=child_env,
-                timeout=validation_timeout_seconds,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            result["status"] = "validation_failed"
-            result["error"] = (
-                f"crawler validation exceeded {validation_timeout_seconds} seconds"
-            )
-            return result
-        (run_dir / f"{slug}-validator.log").write_text(
-            validation.stdout + validation.stderr,
-            encoding="utf-8",
-        )
-        validation_data = json.loads(validator_report.read_text(encoding="utf-8"))
-        if validation_data["status"] == "empty":
-            write_empty_blocked(workspace, url, country_code_for_url(url))
-            validate_change_scope(workspace, crawler_directory(url))
-            validation_data = {"status": "blocked", "converted_from_empty": True}
-        elif validation.returncode != 0:
-            result["status"] = "validation_failed"
-            result["validation"] = validation_data
-            result["error"] = validation_data.get("error")
-            return result
-        result["status"] = "blocked" if validation_data["status"] == "blocked" else "generated"
-        result["validation"] = validation_data
+        output_path = workspace / crawler_directory(url)
+        result["status"] = "blocked" if (output_path / "BLOCKED.md").exists() else "generated"
+        if builder_report.exists():
+            try:
+                builder_data = json.loads(builder_report.read_text(encoding="utf-8"))
+                if builder_data:
+                    result["final_response"] = builder_data[-1].get("final_response")
+            except (json.JSONDecodeError, OSError, TypeError, AttributeError) as exc:
+                warning = f"builder report could not be read: {type(exc).__name__}"
+                result["generation_warning"] = (
+                    f"{result['generation_warning']}; {warning}"
+                    if result["generation_warning"]
+                    else warning
+                )
         result["commit"] = git_commit(workspace, url, result["status"])
-        return result
-    except subprocess.TimeoutExpired:
-        result["status"] = "timed_out"
-        result["error"] = f"attempt exceeded {timeout_minutes} minutes"
         return result
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
@@ -351,26 +318,36 @@ def reset_failed_attempt(workspace: Path) -> None:
 
 
 def pr_body(results: list[dict], model: str, run_id: str) -> str:
-    rows = ["| URL | Result | Validation | Directory |", "|---|---|---|---|"]
+    rows = ["| URL | Result | Generation warning | Directory |", "|---|---|---|---|"]
     for result in results:
-        validation = result.get("validation") or {}
         rows.append(
             f"| {result['url']} | {result['status']} | "
-            f"{validation.get('status', 'n/a')} | `{result['crawler_directory']}` |"
+            f"{result.get('generation_warning') or 'none'} | `{result['crawler_directory']}` |"
         )
-    return "\n".join(
-        [
-            "Automated crawler-factory batch.",
-            "",
-            *rows,
-            "",
-            f"- Run ID: `{run_id}`",
-            f"- Model: `{model}`",
-            f"- Total attempts: {len(results)}",
-            "",
-            "Detailed sanitized logs and JSON reports are retained by the worker.",
-        ]
-    )
+    sections = [
+        "Automated crawler-factory batch.",
+        "",
+        *rows,
+        "",
+        f"- Run ID: `{run_id}`",
+        f"- Model: `{model}`",
+        f"- Total attempts: {len(results)}",
+        "",
+        "Detailed sanitized logs and JSON reports are retained by the worker.",
+    ]
+    for result in results:
+        if result.get("final_response"):
+            sections.extend(
+                [
+                    "",
+                    f"<details><summary>Codex report for {result['url']}</summary>",
+                    "",
+                    result["final_response"],
+                    "",
+                    "</details>",
+                ]
+            )
+    return "\n".join(sections)
 
 
 def parse_args() -> argparse.Namespace:
@@ -379,7 +356,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-branch", default="master")
     parser.add_argument("--max-urls", type=int, default=5)
     parser.add_argument("--timeout-minutes", type=int, default=30)
-    parser.add_argument("--validation-timeout-seconds", type=int, default=300)
     parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE_PATH)
     parser.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS_DIR)
     parser.add_argument("--url", action="append", dest="urls")
@@ -391,8 +367,6 @@ def parse_args() -> argparse.Namespace:
 def run_factory(args: argparse.Namespace) -> None:
     if args.max_urls < 1:
         raise SystemExit("--max-urls must be at least 1")
-    if args.validation_timeout_seconds < 1:
-        raise SystemExit("--validation-timeout-seconds must be at least 1")
     run_id = f"{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:8]}"
     run_dir = args.runs_dir / run_id
     run_dir.mkdir(parents=True)
@@ -429,7 +403,6 @@ def run_factory(args: argparse.Namespace) -> None:
                 run_dir,
                 url,
                 args.timeout_minutes,
-                args.validation_timeout_seconds,
                 child_env,
             )
             results.append(result)
@@ -449,7 +422,7 @@ def run_factory(args: argparse.Namespace) -> None:
         report_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
         successful = [item for item in results if item["status"] in {"generated", "blocked"}]
         if not successful:
-            print(f"No validated changes; report: {report_path}")
+            print(f"No generated changes; report: {report_path}")
             return
         if args.no_push:
             print(f"Created {len(successful)} commits in {workspace}; report: {report_path}")

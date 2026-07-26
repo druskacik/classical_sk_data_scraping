@@ -26,7 +26,7 @@ Implement the crawler as a `BaseCrawler` subclass with a `scrape()` method.
 During investigation and testing call `scrape()` directly. Do not call
 `BaseCrawler.run()`, upload data, connect to the database, or write a CSV.
 If retrying a directory that already contains `BLOCKED.md`, delete
-`BLOCKED.md` when a validated `main.py` is successfully created. Never leave
+`BLOCKED.md` when a working `main.py` is successfully created. Never leave
 both files in the directory.
 
 If it is not possible to build a working crawler after investigating API and HTML options, create the target crawler directory but do not create `main.py`. Instead, create `BLOCKED.md` in that directory explaining:
@@ -40,7 +40,7 @@ Also use `BLOCKED.md` when the source currently exposes no concerts, even if
 this appears seasonal. Start `BLOCKED.md` with exactly this metadata block,
 using one of `no_current_events`, `access_blocked`, `no_parseable_source`, or
 `implementation_failed` as the reason code. The outer worker will normalize
-the URL, country, attempt date, and retry date before validation:
+the URL, country, attempt date, and retry date before publication:
 
 <!-- crawler-factory-metadata
 {"url":"{{ url }}","country_code":"{{ country_code }}","reason_code":"no_current_events","attempted_at":"YYYY-MM-DD","retry_after":"YYYY-MM-DD"}

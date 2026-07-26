@@ -4,7 +4,6 @@ import argparse
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -56,7 +55,12 @@ def generated_directories(workspace: Path, base_ref: str) -> list[Path]:
         if candidate.exists():
             if candidate.stat().st_size > 256_000:
                 raise PullRequestValidationError(f"generated file is larger than 256 KB: {raw_path}")
-            text = candidate.read_text(encoding="utf-8")
+            try:
+                text = candidate.read_text(encoding="utf-8")
+            except UnicodeDecodeError as exc:
+                raise PullRequestValidationError(
+                    f"generated file is not valid UTF-8: {raw_path}"
+                ) from exc
             secret_patterns = (
                 r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
                 r"\bgh[opsu]_[A-Za-z0-9]{20,}\b",
@@ -73,68 +77,33 @@ def generated_directories(workspace: Path, base_ref: str) -> list[Path]:
         ).returncode == 0
         if base_main:
             raise PullRequestValidationError(f"existing crawler may not be modified: {directory}")
+        main_path = workspace / directory / "main.py"
+        blocked_path = workspace / directory / "BLOCKED.md"
+        if main_path.exists() == blocked_path.exists():
+            raise PullRequestValidationError(
+                f"{directory} must contain exactly one of main.py or BLOCKED.md"
+            )
     return sorted(directories)
 
 
-def is_transient_failure(payload: dict) -> bool:
-    error = payload.get("error", "").lower()
-    return any(
-        marker in error
-        for marker in (
-            "connectionerror",
-            "connecttimeout",
-            "readtimeout",
-            "requestexception",
-            "temporarily unavailable",
-            "timed out",
-            "timeout",
-        )
-    )
-
-
-def validate_directory(workspace: Path, directory: Path, timeout_seconds: int) -> dict:
-    output = workspace / ".crawler-validation.json"
-    validator_command = [
-        sys.executable,
-        "automation/validate_generated_crawler.py",
-        "--workspace",
-        str(workspace),
-        "--crawler",
-        str(directory),
-        "--country-code",
-        directory.parts[1].upper(),
-        "--output",
-        str(output),
-    ]
-    result = None
-    payload = {}
-    for attempt in range(2):
-        result = command(validator_command, workspace, timeout=timeout_seconds)
-        if output.exists():
-            payload = json.loads(output.read_text(encoding="utf-8"))
-        if result.returncode == 0:
-            break
-        if attempt == 0 and is_transient_failure(payload):
-            continue
-        break
-    assert result is not None
+def validate_directory(workspace: Path, directory: Path) -> dict:
+    main_path = workspace / directory / "main.py"
+    if not main_path.exists():
+        return {"status": "passed", "kind": "blocked"}
+    source = main_path.read_text(encoding="utf-8")
     try:
-        if not payload:
-            payload = json.loads(output.read_text(encoding="utf-8"))
-    finally:
-        output.unlink(missing_ok=True)
-    if result.returncode:
+        compile(source, str(main_path), "exec")
+    except SyntaxError as exc:
         raise PullRequestValidationError(
-            f"{directory} failed validation: {payload.get('error', result.stderr.strip())}"
-        )
-    return payload
+            f"{directory} has invalid Python syntax: {exc}"
+        ) from exc
+    return {"status": "passed", "kind": "crawler"}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate an automated crawler-factory PR.")
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
     parser.add_argument("--base-ref", default="origin/master")
-    parser.add_argument("--timeout-seconds", type=int, default=300)
     return parser.parse_args()
 
 
@@ -144,11 +113,7 @@ def main() -> None:
     results = {}
     try:
         for directory in generated_directories(workspace, args.base_ref):
-            results[str(directory)] = validate_directory(
-                workspace,
-                directory,
-                args.timeout_seconds,
-            )
+            results[str(directory)] = validate_directory(workspace, directory)
     except Exception as exc:
         print(json.dumps({"status": "failed", "error": f"{type(exc).__name__}: {exc}"}, indent=2))
         raise SystemExit(1)

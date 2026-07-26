@@ -1,13 +1,20 @@
 # Crawler factory deployment
 
 The crawler factory is a separate scheduled worker. It clones `master` into a
-temporary directory, attempts at most five hardcoded URLs, commits validated
+temporary directory, attempts at most five hardcoded URLs, commits generated
 `main.py` or `BLOCKED.md` results, opens one pull request, and enables squash
 auto-merge. Codex runs with the workspace-write sandbox inside that disposable
 clone; the local builder retains its existing full-access default.
 
-Live validation defaults to 300 seconds per crawler and can be changed with
-`--validation-timeout-seconds`.
+Codex is trusted to investigate, implement, and test the crawler. The worker
+does not repeat the live scrape. It preserves any result confined to the
+expected new crawler directory, including a usable result left behind when the
+Codex process exits unsuccessfully or reaches its generation timeout.
+
+The required GitHub check is deliberately limited to deterministic repository
+safety: generated-file scope, protection of existing crawlers, file size,
+UTF-8, likely-secret detection, and Python syntax. Live availability, record
+quality, pagination, and runtime duration are not merge gates.
 
 ## Build and configure
 
