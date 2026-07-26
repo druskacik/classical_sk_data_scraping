@@ -25,7 +25,7 @@ URLS = [
     "https://www.narodni-divadlo.cz/",
     "https://www.cnso.cz/",
     "https://www.musicaflorea.cz/",
-    "https://www.salvator.farnost.cz/",
+    # "https://www.salvator.farnost.cz/",
     "https://www.stnicholas.cz/",
     "https://festival.cz/",
     "https://firkusny.cz/",
