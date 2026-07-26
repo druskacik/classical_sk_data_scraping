@@ -1,7 +1,6 @@
 FROM python:3.12-slim
 
 ARG PLAYWRIGHT_MCP_VERSION=0.0.78
-ARG CAPROVER_GIT_COMMIT_SHA
 
 WORKDIR /factory
 
@@ -20,6 +19,8 @@ RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     npm install --global "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" && \
     ln -s "$(python -c 'from codex_cli_bin import bundled_codex_path; print(bundled_codex_path())')" \
         /usr/local/bin/codex
+
+ARG CAPROVER_GIT_COMMIT_SHA
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
