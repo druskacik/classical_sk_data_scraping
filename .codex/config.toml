@@ -1,6 +1,11 @@
 [mcp_servers.playwright]
 command = "npx"
 args = ["--yes", "@playwright/mcp@0.0.78", "--isolated"]
+env_vars = [
+    "PLAYWRIGHT_MCP_EXECUTABLE_PATH",
+    "PLAYWRIGHT_MCP_HEADLESS",
+    "PLAYWRIGHT_MCP_NO_SANDBOX",
+]
 
 [mcp_servers.playwright.tools.browser_tabs]
 approval_mode = "approve"
