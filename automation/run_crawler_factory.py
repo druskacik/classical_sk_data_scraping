@@ -355,7 +355,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repository", required=True, help="Git clone URL")
     parser.add_argument("--base-branch", default="master")
     parser.add_argument("--max-urls", type=int, default=5)
-    parser.add_argument("--timeout-minutes", type=int, default=30)
+    parser.add_argument("--timeout-minutes", type=int, default=60)
     parser.add_argument("--state-path", type=Path, default=DEFAULT_STATE_PATH)
     parser.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS_DIR)
     parser.add_argument("--url", action="append", dest="urls")

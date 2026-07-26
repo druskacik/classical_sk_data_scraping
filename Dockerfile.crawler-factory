@@ -9,7 +9,7 @@ COPY pyproject.toml uv.lock README.md ./
 RUN unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        build-essential ca-certificates chromium gh git libpq-dev nodejs npm && \
+        build-essential ca-certificates chromium gh git libpq-dev nodejs npm tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 COPY . .
@@ -27,8 +27,13 @@ ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium \
     PLAYWRIGHT_MCP_HEADLESS=true \
     PLAYWRIGHT_MCP_NO_SANDBOX=true \
-    CRAWLER_FACTORY_REPOSITORY=https://github.com/druskacik/classical_sk_data_scraping.git
+    CRAWLER_FACTORY_REPOSITORY=https://github.com/druskacik/classical_sk_data_scraping.git \
+    CRAWLER_FACTORY_SCHEDULE_TIME=06:00 \
+    CRAWLER_FACTORY_TIMEZONE=Europe/Prague \
+    CRAWLER_FACTORY_UPDATE_INTERVAL_MINUTES=5 \
+    CRAWLER_FACTORY_MAX_URLS=5 \
+    CRAWLER_FACTORY_TIMEOUT_MINUTES=60
 
 VOLUME ["/var/lib/crawler-factory", "/factory-home", "/factory-codex-home"]
 
-CMD ["sh", "-c", "python -m automation.run_crawler_factory --repository \"$CRAWLER_FACTORY_REPOSITORY\""]
+CMD ["python", "-m", "automation.run_crawler_factory_service"]
