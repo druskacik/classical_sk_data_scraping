@@ -95,9 +95,11 @@ Set these in **App Configs > Environmental Variables**:
 | `CRAWLER_FACTORY_MAX_URLS` | `5` | daily URL limit |
 | `CRAWLER_FACTORY_TIMEOUT_MINUTES` | `60` | per-URL Codex timeout |
 
-CapRover supplies `CAPROVER_GIT_COMMIT_SHA` automatically for a Git-based
-deployment. Do not configure it manually. The supervisor compares it with the
-current `master` SHA.
+CapRover supplies `CAPROVER_GIT_COMMIT_SHA` to the Docker build for a Git-based
+deployment. `Dockerfile.crawler-factory` copies that build argument into the
+running container, where the supervisor compares it with the current `master`
+SHA. Do not configure it manually in CapRover's environmental variables,
+because a manually entered value would become stale after deployment.
 
 All numeric settings must be positive integers. An invalid schedule, timezone,
 or numeric setting stops startup with an explicit error. If either the
