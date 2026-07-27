@@ -214,6 +214,29 @@ class FactoryServiceTests(unittest.TestCase):
 
         remote.assert_not_called()
 
+    def test_service_loop_calls_update_check_without_obsolete_timestamp_argument(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            today = datetime.now(supervisor.config.timezone).date().isoformat()
+            supervisor.state["last_factory_attempt_date"] = today
+
+            def stop_after_check():
+                supervisor.stop_event.set()
+                return False
+
+            with (
+                patch.object(service.signal, "signal"),
+                patch.object(service, "prepare_git_authentication"),
+                patch.object(
+                    supervisor,
+                    "check_for_update",
+                    side_effect=stop_after_check,
+                ) as check,
+            ):
+                supervisor.run()
+
+        check.assert_called_once_with()
+
     def test_stop_signal_is_forwarded_to_active_child(self):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))

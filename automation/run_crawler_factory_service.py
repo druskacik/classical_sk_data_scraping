@@ -274,7 +274,7 @@ class FactoryService:
                 continue
             monotonic_now = time.monotonic()
             if monotonic_now >= next_update_check:
-                self.check_for_update(monotonic_now)
+                self.check_for_update()
                 next_update_check = monotonic_now + self.config.update_interval_seconds
             self.stop_event.wait(1)
         log("Stopped")
