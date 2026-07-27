@@ -100,6 +100,9 @@ deployment. `Dockerfile.crawler-factory` copies that build argument into the
 running container, where the supervisor compares it with the current `master`
 SHA. Do not configure it manually in CapRover's environmental variables,
 because a manually entered value would become stale after deployment.
+The supervisor normalizes and validates both commit SHAs and records each
+successfully requested target SHA in its persistent service state. A container
+restart therefore cannot request the same deployment repeatedly.
 
 All numeric settings must be positive integers. An invalid schedule, timezone,
 or numeric setting stops startup with an explicit error. If either the

@@ -10,6 +10,10 @@ from zoneinfo import ZoneInfo
 import automation.run_crawler_factory_service as service
 
 
+OLD_SHA = "a" * 40
+NEW_SHA = "b" * 40
+
+
 class ServiceConfigTests(unittest.TestCase):
     def test_defaults(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -112,8 +116,24 @@ class FactoryServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
-                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": "abc"}, clear=True),
-                patch.object(service, "remote_commit", return_value="abc"),
+                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
+                patch.object(service, "remote_commit", return_value=OLD_SHA),
+                patch.object(service, "request_deployment") as deploy,
+            ):
+                self.assertFalse(supervisor.check_for_update())
+
+        deploy.assert_not_called()
+
+    def test_matching_commit_with_trailing_newline_does_not_request_deployment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            with (
+                patch.dict(
+                    os.environ,
+                    {"CAPROVER_GIT_COMMIT_SHA": f"{OLD_SHA}\n"},
+                    clear=True,
+                ),
+                patch.object(service, "remote_commit", return_value=OLD_SHA),
                 patch.object(service, "request_deployment") as deploy,
             ):
                 self.assertFalse(supervisor.check_for_update())
@@ -124,43 +144,65 @@ class FactoryServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
-                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": "old"}, clear=True),
-                patch.object(service, "remote_commit", return_value="new"),
+                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
                 patch.object(service, "request_deployment") as deploy,
             ):
-                self.assertTrue(supervisor.check_for_update(monotonic_now=100))
+                self.assertTrue(supervisor.check_for_update())
 
         deploy.assert_called_once_with("https://captain.test/hook")
 
-    def test_successful_request_is_suppressed_during_cooldown(self):
+    def test_successful_request_is_suppressed_after_service_restart(self):
         with tempfile.TemporaryDirectory() as temporary:
-            supervisor = service.FactoryService(self.config(Path(temporary)))
+            root = Path(temporary)
+            config = self.config(root)
+            supervisor = service.FactoryService(config)
             with (
-                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": "old"}, clear=True),
-                patch.object(service, "remote_commit", return_value="new"),
+                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
                 patch.object(service, "request_deployment") as deploy,
             ):
-                self.assertTrue(supervisor.check_for_update(monotonic_now=100))
-                self.assertFalse(supervisor.check_for_update(monotonic_now=200))
+                self.assertTrue(supervisor.check_for_update())
+                restarted_supervisor = service.FactoryService(config)
+                self.assertFalse(restarted_supervisor.check_for_update())
 
-        deploy.assert_called_once()
+            deploy.assert_called_once()
+            state = service.load_service_state(root / "service-state.json")
+            self.assertEqual(state["last_deploy_request_sha"], NEW_SHA)
 
     def test_failed_request_can_retry_on_next_check(self):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
-                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": "old"}, clear=True),
-                patch.object(service, "remote_commit", return_value="new"),
+                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
                 patch.object(
                     service,
                     "request_deployment",
                     side_effect=[RuntimeError("failed"), None],
                 ) as deploy,
             ):
-                self.assertFalse(supervisor.check_for_update(monotonic_now=100))
-                self.assertTrue(supervisor.check_for_update(monotonic_now=200))
+                self.assertFalse(supervisor.check_for_update())
+                self.assertTrue(supervisor.check_for_update())
 
         self.assertEqual(deploy.call_count, 2)
+
+    def test_invalid_deployed_commit_disables_update(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            with (
+                patch.dict(
+                    os.environ,
+                    {"CAPROVER_GIT_COMMIT_SHA": "not-a-commit"},
+                    clear=True,
+                ),
+                patch.object(service, "remote_commit") as remote,
+                patch.object(service, "request_deployment") as deploy,
+            ):
+                self.assertFalse(supervisor.check_for_update())
+
+        remote.assert_not_called()
+        deploy.assert_not_called()
 
     def test_update_is_skipped_while_factory_child_is_active(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -187,7 +229,7 @@ class FactoryServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary), webhook=None))
             with (
-                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": "old"}, clear=True),
+                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
                 patch.object(service, "remote_commit") as remote,
             ):
                 self.assertFalse(supervisor.check_for_update())

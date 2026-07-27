@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -9,14 +10,14 @@ import threading
 import time
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, time as wall_time
+from datetime import UTC, datetime, time as wall_time
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 DEFAULT_SERVICE_STATE_PATH = Path("/var/lib/crawler-factory/service-state.json")
 DEFAULT_REPOSITORY = "https://github.com/druskacik/classical_sk_data_scraping.git"
-DEPLOY_RETRY_SECONDS = 30 * 60
+COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 def log(message: str) -> None:
@@ -109,6 +110,13 @@ def batch_is_due(now: datetime, schedule_time: wall_time, state: dict) -> bool:
     )
 
 
+def normalize_commit_sha(value: str, source: str) -> str:
+    normalized = value.strip().lower()
+    if not COMMIT_SHA_PATTERN.fullmatch(normalized):
+        raise ValueError(f"{source} is not a 40-character hexadecimal commit SHA")
+    return normalized
+
+
 def remote_commit(repository: str, branch: str = "master") -> str:
     result = subprocess.run(
         ["git", "ls-remote", repository, f"refs/heads/{branch}"],
@@ -120,7 +128,7 @@ def remote_commit(repository: str, branch: str = "master") -> str:
     fields = result.stdout.split()
     if len(fields) < 2:
         raise RuntimeError(f"Remote branch {branch!r} was not found")
-    return fields[0]
+    return normalize_commit_sha(fields[0], f"remote branch {branch!r}")
 
 
 def request_deployment(webhook: str) -> None:
@@ -156,8 +164,6 @@ class FactoryService:
         self.state = load_service_state(config.state_path)
         self.stop_event = threading.Event()
         self.child: subprocess.Popen | None = None
-        self.last_deploy_request_sha: str | None = None
-        self.last_deploy_request_at = 0.0
         self._configuration_warning_logged = False
 
     def stop(self, signum: int, _frame: object = None) -> None:
@@ -200,18 +206,28 @@ class FactoryService:
             self.child = None
             log(f"Daily batch finished with status {return_code}")
 
-    def check_for_update(self, monotonic_now: float | None = None) -> bool:
+    def check_for_update(self) -> bool:
         if self.child is not None and self.child.poll() is None:
             return False
-        deployed_commit = os.getenv("CAPROVER_GIT_COMMIT_SHA")
-        if not self.config.deploy_webhook or not deployed_commit:
+        deployed_commit_value = os.getenv("CAPROVER_GIT_COMMIT_SHA")
+        if not self.config.deploy_webhook or not deployed_commit_value:
             if not self._configuration_warning_logged:
                 missing = []
                 if not self.config.deploy_webhook:
                     missing.append("CRAWLER_FACTORY_DEPLOY_WEBHOOK")
-                if not deployed_commit:
+                if not deployed_commit_value:
                     missing.append("CAPROVER_GIT_COMMIT_SHA")
                 log(f"Automatic updates disabled; missing {', '.join(missing)}")
+                self._configuration_warning_logged = True
+            return False
+        try:
+            deployed_commit = normalize_commit_sha(
+                deployed_commit_value,
+                "CAPROVER_GIT_COMMIT_SHA",
+            )
+        except ValueError as exc:
+            if not self._configuration_warning_logged:
+                log(f"Automatic updates disabled; {exc}")
                 self._configuration_warning_logged = True
             return False
         try:
@@ -221,19 +237,16 @@ class FactoryService:
             return False
         if latest_commit == deployed_commit:
             return False
-        checked_at = time.monotonic() if monotonic_now is None else monotonic_now
-        if (
-            latest_commit == self.last_deploy_request_sha
-            and checked_at - self.last_deploy_request_at < DEPLOY_RETRY_SECONDS
-        ):
+        if self.state.get("last_deploy_request_sha") == latest_commit:
             return False
         try:
             request_deployment(self.config.deploy_webhook)
         except Exception as exc:
             log(f"Could not request CapRover deployment: {type(exc).__name__}: {exc}")
             return False
-        self.last_deploy_request_sha = latest_commit
-        self.last_deploy_request_at = checked_at
+        self.state["last_deploy_request_sha"] = latest_commit
+        self.state["last_deploy_request_at"] = datetime.now(UTC).isoformat()
+        save_service_state(self.config.state_path, self.state)
         log(
             "Requested CapRover deployment for "
             f"{latest_commit[:12]} (currently {deployed_commit[:12]})"
