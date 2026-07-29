@@ -1,6 +1,7 @@
 import json
 import csv
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import date, timedelta
@@ -158,6 +159,46 @@ class RegistryIdentityTests(unittest.TestCase):
         self.assertTrue(
             existing_seed_paths.issubset(existing_paths),
             existing_seed_paths - existing_paths,
+        )
+
+
+class FactoryArgumentTests(unittest.TestCase):
+    def test_repository_defaults_to_environment(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"CRAWLER_FACTORY_REPOSITORY": "https://example.test/repository.git"},
+                clear=False,
+            ),
+            patch.object(sys, "argv", ["run_crawler_factory"]),
+        ):
+            args = factory.parse_args()
+        self.assertEqual(
+            args.repository,
+            "https://example.test/repository.git",
+        )
+
+    def test_repository_flag_overrides_environment(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"CRAWLER_FACTORY_REPOSITORY": "https://example.test/default.git"},
+                clear=False,
+            ),
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "run_crawler_factory",
+                    "--repository",
+                    "https://example.test/override.git",
+                ],
+            ),
+        ):
+            args = factory.parse_args()
+        self.assertEqual(
+            args.repository,
+            "https://example.test/override.git",
         )
 
 

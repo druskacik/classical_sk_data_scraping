@@ -399,7 +399,14 @@ def pr_body(results: list[dict], model: str, run_id: str) -> str:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate and publish a database-backed crawler batch.")
-    parser.add_argument("--repository", required=True, help="Git clone URL")
+    parser.add_argument(
+        "--repository",
+        default=os.getenv("CRAWLER_FACTORY_REPOSITORY"),
+        help=(
+            "Git clone URL. Defaults to the CRAWLER_FACTORY_REPOSITORY "
+            "environment variable."
+        ),
+    )
     parser.add_argument("--base-branch", default="master")
     parser.add_argument("--max-urls", type=int, default=5)
     parser.add_argument("--timeout-minutes", type=int, default=60)
@@ -410,7 +417,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-id", action="append", type=int, dest="source_ids")
     parser.add_argument("--no-push", action="store_true", help="Generate commits but do not push or open a PR")
     parser.add_argument("--keep-workspace", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.repository:
+        parser.error(
+            "--repository is required when CRAWLER_FACTORY_REPOSITORY is not set"
+        )
+    return args
 
 
 def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:

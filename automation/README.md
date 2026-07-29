@@ -213,13 +213,15 @@ affect the supervisor's daily-attempt marker:
 ```bash
 docker exec -it <container-id> \
   python -m automation.run_crawler_factory \
-    --repository https://github.com/druskacik/classical_sk_data_scraping.git \
     --max-urls 1
 ```
 
 Use `--source-id ID` to target a due registry row. `--url URL` remains
 available for manual discovery/debugging and idempotently ingests the URL
 before selection; add `--country-code XX` when the country cannot be inferred.
+Inside the deployed container, the repository defaults to
+`CRAWLER_FACTORY_REPOSITORY`. Pass `--repository` only to override it or when
+running outside that configured environment.
 
 The worker's file lock prevents this command from overlapping an already
 active scheduled batch.
