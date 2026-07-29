@@ -12,70 +12,6 @@ import pystache
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 
-URLS = [
-    "https://www.hamu.cz/",
-    "https://www.ceskafilharmonie.cz/",
-    "https://www.berg.cz/",
-    "https://www.varhannifestival.cz/",
-    "https://www.neoklasikorchestr.cz/",
-    "https://www.auditeorganum.cz/",
-    "https://www.liedercompany.cz/",
-    "https://www.hybatelerezonance.cz/",
-    "https://www.letnislavnosti.cz/",
-    "https://www.narodni-divadlo.cz/",
-    "https://www.cnso.cz/",
-    "https://www.musicaflorea.cz/",
-    # "https://www.salvator.farnost.cz/",
-    "https://www.stnicholas.cz/",
-    "https://festival.cz/",
-    "https://firkusny.cz/",
-    "https://www.dvorak-symphony-orchestra.com/",
-    "https://www.pkf.cz/",
-    "https://praguesounds.cz/",
-    "https://socr.rozhlas.cz/",
-    "https://www.fok.cz/",
-    "https://www.collegiummarianum.cz/",
-    "https://collegium1704.com/",
-    "https://www.prgcons.cz/",
-    "https://www.bachcollegium.cz/",
-    "https://www.dvorakovapraha.cz/",
-    "https://www.camerata2018.cz/",
-    "https://www.pko.cz/",
-    "https://www.suksymphony.cz/",
-    "https://www.ensembleinegal.cz/",
-    "https://praha.charita.cz/",
-    "https://www.pragueclassicalconcerts.com/",
-    "https://www.pragueticketoffice.com/",
-    "https://www.bco.cz/",
-    "https://filharmonie-brno.cz/",
-    "https://www.ndbrno.cz/",
-    "https://jamu.cz/",
-    "https://www.msobrno.cz/",
-    "https://www.konzervatorbrno.eu/",
-    "https://www.ebcz.eu/",
-    "https://www.cfsbrno.cz/",
-    "https://www.mhflj.cz/",
-    "https://shf.cz/",
-    "https://www.ndm.cz/",
-    "https://www.jko.cz/",
-    "https://www.jfo.cz/",
-    "https://www.djkt.eu/",
-    "https://www.smetanovskedny.cz/",
-    "https://www.plzenskafilharmonie.cz/",
-    "https://www.saldovo-divadlo.cz/",
-    "https://www.moravskedivadlo.cz/",
-    "https://www.mfo.cz/",
-    "https://www.jcfilharmonie.cz/",
-    "https://www.jihoceskedivadlo.cz/",
-    "https://www.jhf.cz/",
-    "https://www.fhk.cz/",
-    "https://www.operabalet.cz/",
-    "https://www.kfpar.cz/",
-    "https://www.divadlojablonec.cz/",
-    "https://www.filharmonie-zlin.cz/",
-    "https://www.kso.cz/",
-]
-
 MODEL = "gpt-5.6-sol"
 PROMPT_PATH = Path("prompts/build_crawler.mustache")
 CRAWLERS_DIR = Path("crawlers")
@@ -121,9 +57,21 @@ def country_code_for_url(url: str) -> str:
     raise ValueError(f"Could not infer country code from URL: {url!r}. Pass only country-specific domains or add a mapping.")
 
 
-def render_prompt(url: str, workspace: Path | None = None) -> str:
+def render_prompt(
+    url: str,
+    workspace: Path | None = None,
+    country_code: str | None = None,
+    crawler_directory: Path | None = None,
+) -> str:
     template = ((workspace or Path.cwd()) / PROMPT_PATH).read_text(encoding="utf-8")
-    return pystache.render(template, {"url": url, "country_code": country_code_for_url(url)})
+    return pystache.render(
+        template,
+        {
+            "url": url,
+            "country_code": country_code or country_code_for_url(url),
+            "crawler_directory": str(crawler_directory) if crawler_directory else "",
+        },
+    )
 
 
 def crawler_status(crawler_dir: Path) -> str:
@@ -140,10 +88,19 @@ def build_crawler(
     workspace: Path | None = None,
     retry_blocked: bool = False,
     sandbox: Sandbox = Sandbox.full_access,
+    country_code: str | None = None,
+    crawler_directory: Path | None = None,
 ) -> dict:
     workspace = (workspace or Path.cwd()).resolve()
-    folder_name = crawler_folder_name(url)
-    crawler_dir = workspace / CRAWLERS_DIR / country_code_for_url(url).lower() / folder_name
+    country = (country_code or country_code_for_url(url)).upper()
+    relative_directory = (
+        crawler_directory
+        if crawler_directory is not None
+        else CRAWLERS_DIR / country.lower() / crawler_folder_name(url)
+    )
+    if relative_directory.is_absolute() or ".." in relative_directory.parts:
+        raise ValueError("crawler_directory must be repository-relative")
+    crawler_dir = workspace / relative_directory
     status = crawler_status(crawler_dir)
 
     if status == "BLOCKED" and retry_blocked:
@@ -158,7 +115,7 @@ def build_crawler(
             "error": None,
         }
 
-    prompt = render_prompt(url, workspace)
+    prompt = render_prompt(url, workspace, country, relative_directory)
     print(f"BUILD {url} -> {crawler_dir}")
 
     thread = codex.thread_start(
@@ -195,7 +152,16 @@ def parse_args() -> argparse.Namespace:
         "--url",
         action="append",
         dest="urls",
-        help="URL to build. Can be provided multiple times. Defaults to the URLS list in this file.",
+        help="URL to build. Can be provided multiple times; there is no hardcoded default.",
+    )
+    parser.add_argument(
+        "--country-code",
+        help="Explicit ISO country code. Required when it cannot be inferred from the URL.",
+    )
+    parser.add_argument(
+        "--crawler-directory",
+        type=Path,
+        help="Exact repository-relative crawler directory assigned by the source registry.",
     )
     parser.add_argument(
         "--dry-run",
@@ -206,7 +172,7 @@ def parse_args() -> argparse.Namespace:
         "--max-urls",
         type=int,
         default=None,
-        help="Process at most this many URLs after applying --url/default selection.",
+        help="Process at most this many explicitly supplied URLs.",
     )
     parser.add_argument(
         "--workspace",
@@ -241,7 +207,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    urls = args.urls or URLS
+    urls = args.urls
+    if not urls:
+        raise SystemExit("At least one explicit --url is required; scheduled batches use the database registry.")
+    if (args.country_code or args.crawler_directory) and len(urls) != 1:
+        raise SystemExit("--country-code and --crawler-directory require exactly one --url")
     if args.max_urls is not None:
         if args.max_urls < 1:
             raise SystemExit("--max-urls must be at least 1")
@@ -250,7 +220,12 @@ def main() -> None:
 
     if args.dry_run:
         for url in urls:
-            crawler_dir = workspace / CRAWLERS_DIR / country_code_for_url(url).lower() / crawler_folder_name(url)
+            country = (args.country_code or country_code_for_url(url)).upper()
+            relative = (
+                args.crawler_directory
+                or CRAWLERS_DIR / country.lower() / crawler_folder_name(url)
+            )
+            crawler_dir = workspace / relative
             action = crawler_status(crawler_dir)
             print(f"{action} {url} -> {crawler_dir.relative_to(workspace)}")
         return
@@ -268,6 +243,8 @@ def main() -> None:
                     workspace,
                     args.retry_blocked,
                     sandbox,
+                    args.country_code,
+                    args.crawler_directory,
                 )
             except Exception as exc:
                 result = {

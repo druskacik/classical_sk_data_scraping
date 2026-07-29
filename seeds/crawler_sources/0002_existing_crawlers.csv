@@ -1,0 +1,21 @@
+url,country_code,canonical_url,crawler_path,priority,notes
+https://www.prgphil.cz/,CZ,,crawlers/cz/prgphil_cz,0,Existing manually maintained crawler
+https://www.cultusruzinov.sk/,SK,,crawlers/sk/cultusruzinov_sk,0,Existing manually maintained crawler
+https://www.filharmonia.sk/,SK,,crawlers/sk/filharmonia_sk,0,Existing manually maintained crawler
+https://goout.net/,SK,,crawlers/sk/goout_net,0,Existing manually maintained broad-source crawler
+https://www.konvergencie.sk/,SK,,crawlers/sk/konvergencie_sk,0,Existing manually maintained crawler
+https://www.kpvh.sk/,SK,,crawlers/sk/kpvh_sk,0,Existing manually maintained crawler
+https://kultura.trnava.sk/,SK,,crawlers/sk/kultura_trnava_sk,0,Existing manually maintained crawler
+https://nedbalka.sk/,SK,,crawlers/sk/nedbalka_sk,0,Existing manually maintained crawler
+https://podujatia.pkopresov.sk/,SK,,crawlers/sk/pkopresov_sk,0,Existing manually maintained crawler
+https://predpredaj.zoznam.sk/,SK,,crawlers/sk/predpredaj_zoznam_sk,0,Existing manually maintained broad-source crawler
+https://www.sdke.sk/,SK,,crawlers/sk/sdke_sk,0,Existing manually maintained crawler
+https://www.sfk.sk/,SK,,crawlers/sk/sfk_sk,0,Existing manually maintained crawler
+https://simachart.weebly.com/,SK,,crawlers/sk/simachart_weebly_com,0,Existing manually maintained crawler
+https://skozilina.sk/,SK,,crawlers/sk/skozilina_sk,0,Existing manually maintained crawler
+https://snd.sk/,SK,,crawlers/sk/snd_sk,0,Existing manually maintained crawler
+https://www.stateopera.sk/,SK,,crawlers/sk/stateopera_sk,0,Existing manually maintained crawler
+https://devin.stvr.sk/,SK,,crawlers/sk/stvr_sk,0,Existing manually maintained crawler
+https://www.ticketportal.sk/,SK,,crawlers/sk/ticketportal_sk,0,Existing manually maintained broad-source crawler
+https://tootoot.fm/,SK,,crawlers/sk/tootoot_fm,0,Existing manually maintained broad-source crawler
+https://www.vivamusica.sk/,SK,,crawlers/sk/vivamusica_sk,0,Existing manually maintained crawler

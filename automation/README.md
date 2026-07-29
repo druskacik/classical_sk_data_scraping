@@ -6,9 +6,10 @@ process to finish, and only then asks CapRover to deploy a newer `master`
 commit. It therefore remains decoupled from the normal crawler runner and does
 not interrupt its own agents during automatic updates.
 
-Each batch clones `master` into a temporary directory, attempts at most five
-hardcoded URLs, commits generated `main.py` or `BLOCKED.md` results, opens one
-pull request, and enables squash auto-merge. Codex runs with the
+Each batch clones `master` into a temporary directory, atomically claims at
+most five due sources from PostgreSQL, commits generated `main.py` or
+`BLOCKED.md` results, opens one pull request, and enables squash auto-merge.
+Codex runs with the
 `workspace-write` sandbox inside the disposable clone.
 
 Codex is trusted to investigate, implement, and test each crawler. The worker
@@ -73,7 +74,7 @@ volume mappings:
 
 | Container path | Purpose |
 |---|---|
-| `/var/lib/crawler-factory` | retry state, daily schedule state, and run reports |
+| `/var/lib/crawler-factory` | daily schedule state, worker lock, and run reports |
 | `/factory-home` | isolated GitHub CLI home |
 | `/factory-codex-home` | Codex authentication and configuration |
 
@@ -94,6 +95,11 @@ Set these in **App Configs > Environmental Variables**:
 | `CRAWLER_FACTORY_UPDATE_INTERVAL_MINUTES` | `5` | idle update-check interval |
 | `CRAWLER_FACTORY_MAX_URLS` | `5` | daily URL limit |
 | `CRAWLER_FACTORY_TIMEOUT_MINUTES` | `60` | per-URL Codex timeout |
+| `DB_HOST` | required | PostgreSQL host containing the crawler source registry |
+| `DB_NAME` | required | PostgreSQL database name |
+| `DB_USER` | required | PostgreSQL user |
+| `DB_PASS` | required | PostgreSQL password |
+| `DB_PORT` | `5432` in normal deployments | PostgreSQL port |
 
 CapRover supplies `CAPROVER_GIT_COMMIT_SHA` to the Docker build for a Git-based
 deployment. `Dockerfile.crawler-factory` copies that build argument into the
@@ -155,15 +161,49 @@ deployment requests. Detailed generation reports remain under:
 /var/lib/crawler-factory/runs/<run-id>/
 ```
 
-The two persistent state files are:
+The persistent scheduler state and worker lock are:
 
 ```text
-/var/lib/crawler-factory/state.json
 /var/lib/crawler-factory/service-state.json
+/var/lib/crawler-factory/factory.lock
 ```
 
-The first contains per-URL retry state. The second contains the date on which
-the supervisor last attempted its daily batch.
+Source status, retry dates, URL aliases, crawler paths, runs, and attempts live
+in PostgreSQL. `service-state.json` contains the date on which the supervisor
+last attempted its daily batch.
+
+### Apply the initial source seed
+
+Apply migrations before deploying the DB-backed factory:
+
+```bash
+uv run alembic upgrade head
+```
+
+Then import the versioned legacy URL seed against production:
+
+```bash
+uv run python -m seeds.import_crawler_sources \
+  seeds/crawler_sources/0001_legacy_builder_urls.csv \
+  --prod
+```
+
+The importer is transactional and records the filename and SHA-256 checksum.
+Reapplying the identical file is a no-op; changing an applied file is rejected,
+so corrections and additional source batches must use a new numbered CSV.
+Existing `main.py` and `BLOCKED.md` directories are reconciled without Codex
+calls. The legacy Salvator URL is stored as an alias of
+`farnostsalvator.cz` and owns `crawlers/cz/farnostsalvator_cz`.
+
+Apply every seed in filename order. `0002_existing_crawlers.csv` registers the
+historically hand-maintained Slovak crawlers and any other existing crawler
+that was absent from the original builder list:
+
+```bash
+uv run python -m seeds.import_crawler_sources \
+  seeds/crawler_sources/0002_existing_crawlers.csv \
+  --prod
+```
 
 ### Run a manual batch
 
@@ -176,6 +216,10 @@ docker exec -it <container-id> \
     --repository https://github.com/druskacik/classical_sk_data_scraping.git \
     --max-urls 1
 ```
+
+Use `--source-id ID` to target a due registry row. `--url URL` remains
+available for manual discovery/debugging and idempotently ingests the URL
+before selection; add `--country-code XX` when the country cannot be inferred.
 
 The worker's file lock prevents this command from overlapping an already
 active scheduled batch.
@@ -209,6 +253,7 @@ For a one-shot local rehearsal without the supervisor or a pushed PR:
 uv run python -m automation.run_crawler_factory \
   --repository /path/to/local/bare-repository.git \
   --url https://example.cz/ \
+  --country-code CZ \
   --max-urls 1 \
   --no-push \
   --keep-workspace

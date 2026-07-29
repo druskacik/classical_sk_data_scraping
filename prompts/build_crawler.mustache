@@ -16,7 +16,10 @@ If some of the columns can't be extracted in a structured way, use None or a rea
 
 What I mean by description: description is a long body of text related to the concert. It can be large and unstructured, and it's important that it includes details about which composers and works are being played (if this is on the website, of course). The reasoning behind this is that the description will be later parsed by AI to extract composers and works.
 
-Save the new crawler to a new folder, similar to the existing crawlers: example.cz -> `crawlers/cz/example_cz/main.py`. Set `CrawlerConfig.country_code` to `{{ country_code }}`. After building, test it by running it and look at the output.
+Save the new crawler at exactly `{{ crawler_directory }}/main.py`. Do not derive
+a different directory from redirects or alternate domains. Set
+`CrawlerConfig.country_code` to `{{ country_code }}`. After building, test it
+by running it and look at the output.
 
 Only modify the expected new crawler directory. Do not modify shared crawler
 code, dependencies, workflows, prompts, configuration, environment files, or
@@ -29,7 +32,9 @@ If retrying a directory that already contains `BLOCKED.md`, delete
 `BLOCKED.md` when a working `main.py` is successfully created. Never leave
 both files in the directory.
 
-If it is not possible to build a working crawler after investigating API and HTML options, create the target crawler directory but do not create `main.py`. Instead, create `BLOCKED.md` in that directory explaining:
+If it is not possible to build a working crawler after investigating API and
+HTML options, create `{{ crawler_directory }}/BLOCKED.md` but do not create
+`main.py`. Explain:
 
 - the original URL
 - why a crawler cannot currently be implemented

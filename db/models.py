@@ -1,6 +1,7 @@
 from sqlalchemy import (
     ARRAY,
     Boolean,
+    BigInteger,
     Column,
     Date,
     DateTime,
@@ -11,6 +12,8 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    CheckConstraint,
+    Index,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -142,3 +145,120 @@ class ConcertProgramAnalysis(Base):
     last_error = Column(Text)
     last_attempted_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
+
+
+CRAWLER_SOURCE_STATUSES = (
+    "pending",
+    "processing",
+    "pr_open",
+    "active",
+    "blocked",
+    "retry_wait",
+    "duplicate",
+    "needs_attention",
+    "disabled",
+)
+
+
+class CrawlerSource(Base):
+    __tablename__ = "crawler_source"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN {CRAWLER_SOURCE_STATUSES!r}",
+            name="ck_crawler_source_status",
+        ),
+        CheckConstraint("priority >= 0", name="ck_crawler_source_priority"),
+        UniqueConstraint("crawler_path", name="uq_crawler_source_crawler_path"),
+        Index("ix_crawler_source_due", "status", "next_attempt_at", "priority"),
+        Index("ix_crawler_source_lease", "lease_expires_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True)
+    country_code = Column(String(2), nullable=False)
+    canonical_url = Column(Text, nullable=False)
+    crawler_path = Column(Text)
+    status = Column(String, nullable=False, server_default="pending")
+    priority = Column(Integer, nullable=False, server_default="0")
+    next_attempt_at = Column(DateTime(timezone=True))
+    lease_owner = Column(String)
+    lease_expires_at = Column(DateTime(timezone=True))
+    duplicate_of_id = Column(BigInteger, ForeignKey("crawler_source.id"))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CrawlerSourceUrl(Base):
+    __tablename__ = "crawler_source_url"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('submitted', 'canonical', 'redirect')",
+            name="ck_crawler_source_url_role",
+        ),
+        UniqueConstraint("normalized_url", name="uq_crawler_source_url_normalized"),
+        Index("ix_crawler_source_url_source", "crawler_source_id"),
+    )
+
+    id = Column(BigInteger, primary_key=True)
+    crawler_source_id = Column(BigInteger, ForeignKey("crawler_source.id", ondelete="CASCADE"), nullable=False)
+    url = Column(Text, nullable=False)
+    normalized_url = Column(Text, nullable=False)
+    role = Column(String, nullable=False)
+    discovered_by = Column(String, nullable=False)
+    metadata_json = Column(JSONB)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CrawlerFactoryRun(Base):
+    __tablename__ = "crawler_factory_run"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'no_changes', 'pr_open', 'completed', 'failed')",
+            name="ck_crawler_factory_run_status",
+        ),
+    )
+
+    id = Column(String, primary_key=True)
+    worker_id = Column(String, nullable=False)
+    branch = Column(Text)
+    pull_request_url = Column(Text)
+    model = Column(String)
+    status = Column(String, nullable=False, server_default="running")
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at = Column(DateTime(timezone=True))
+
+
+class CrawlerSourceAttempt(Base):
+    __tablename__ = "crawler_source_attempt"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('running', 'generated', 'blocked', 'generation_failed', "
+            "'duplicate', 'skipped_existing', 'abandoned')",
+            name="ck_crawler_source_attempt_outcome",
+        ),
+        Index("ix_crawler_source_attempt_source_started", "crawler_source_id", "started_at"),
+    )
+
+    id = Column(BigInteger, primary_key=True)
+    crawler_source_id = Column(BigInteger, ForeignKey("crawler_source.id", ondelete="CASCADE"), nullable=False)
+    run_id = Column(String, ForeignKey("crawler_factory_run.id", ondelete="CASCADE"), nullable=False)
+    attempted_url = Column(Text, nullable=False)
+    resolved_url = Column(Text)
+    crawler_path = Column(Text)
+    outcome = Column(String, nullable=False, server_default="running")
+    commit_sha = Column(String)
+    pull_request_url = Column(Text)
+    generation_warning = Column(Text)
+    error = Column(Text)
+    retry_after = Column(DateTime(timezone=True))
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at = Column(DateTime(timezone=True))
+
+
+class CrawlerSourceSeed(Base):
+    __tablename__ = "crawler_source_seed"
+
+    filename = Column(Text, primary_key=True)
+    sha256 = Column(String(64), nullable=False)
+    row_count = Column(Integer, nullable=False)
+    applied_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

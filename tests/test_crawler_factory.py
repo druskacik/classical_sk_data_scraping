@@ -1,4 +1,5 @@
 import json
+import csv
 import subprocess
 import tempfile
 import unittest
@@ -7,13 +8,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import automation.run_crawler_factory as factory
+from automation.crawler_registry import normalize_source_url, normalized_crawler_path
 from automation.run_crawler_factory import (
-    attempt_url,
+    attempt_source,
     crawler_directory,
-    load_state,
     normalize_blocked_metadata,
     parse_blocked_metadata,
-    select_urls,
+    reconcile_pull_requests,
     validate_change_scope,
 )
 from automation.validate_crawler_pr import (
@@ -21,6 +22,7 @@ from automation.validate_crawler_pr import (
     generated_directories,
     validate_directory,
 )
+from build_crawlers_with_codex import crawler_folder_name
 
 
 def blocked_text(url: str, country_code: str, attempted: date) -> str:
@@ -67,7 +69,13 @@ class BlockedMetadataTests(unittest.TestCase):
             )
             attempted = date(2026, 7, 25)
 
-            normalize_blocked_metadata(workspace, url, "CZ", attempted)
+            normalize_blocked_metadata(
+                workspace,
+                url,
+                "CZ",
+                crawler_directory(url),
+                attempted,
+            )
             metadata = parse_blocked_metadata(path)
 
         self.assertEqual(metadata["url"], url)
@@ -75,66 +83,132 @@ class BlockedMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["retry_after"], "2026-08-24")
 
 
-class SelectionTests(unittest.TestCase):
-    URLS = [
-        "https://www.hamu.cz/",
-        "https://www.berg.cz/",
-        "https://www.fok.cz/",
-    ]
+class RegistryIdentityTests(unittest.TestCase):
+    def test_url_identity_ignores_scheme_www_and_fragment(self):
+        self.assertEqual(
+            normalize_source_url("http://www.Example.cz/#programme"),
+            "https://example.cz/",
+        )
 
-    def test_selection_skips_existing_and_respects_limit(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            workspace = Path(temporary)
-            existing = workspace / crawler_directory(self.URLS[0])
-            existing.mkdir(parents=True)
-            (existing / "main.py").write_text("", encoding="utf-8")
+    def test_url_identity_preserves_meaningful_path_and_query(self):
+        self.assertEqual(
+            normalize_source_url("https://example.cz/events?season=2026#top"),
+            "https://example.cz/events?season=2026",
+        )
 
-            selected = select_urls(self.URLS, workspace, {"urls": {}}, date.today(), 1)
+    def test_crawler_path_must_be_scoped(self):
+        self.assertEqual(
+            normalized_crawler_path("crawlers/cz/example_cz"),
+            "crawlers/cz/example_cz",
+        )
+        with self.assertRaisesRegex(ValueError, "crawlers/<country>/<slug>"):
+            normalized_crawler_path("example_cz")
 
-        self.assertEqual(selected, [self.URLS[1]])
+    def test_legacy_seed_contains_salvator_alias_and_unique_urls(self):
+        seed = (
+            Path(__file__).parents[1]
+            / "seeds/crawler_sources/0001_legacy_builder_urls.csv"
+        )
+        with seed.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        urls = [row["url"] for row in rows]
+        self.assertEqual(len(urls), len(set(urls)))
+        salvator = next(row for row in rows if "salvator.farnost.cz" in row["url"])
+        self.assertEqual(
+            salvator["canonical_url"],
+            "https://www.farnostsalvator.cz/",
+        )
+        self.assertEqual(
+            salvator["crawler_path"],
+            "crawlers/cz/farnostsalvator_cz",
+        )
 
-    def test_blocked_source_is_due_after_retry_date(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            workspace = Path(temporary)
-            blocked = workspace / crawler_directory(self.URLS[0]) / "BLOCKED.md"
-            blocked.parent.mkdir(parents=True)
-            attempted = date.today() - timedelta(days=30)
-            blocked.write_text(blocked_text(self.URLS[0], "CZ", attempted), encoding="utf-8")
-
-            selected = select_urls(self.URLS, workspace, {"urls": {}}, date.today(), 1)
-
-        self.assertEqual(selected, [self.URLS[0]])
-
-    def test_recent_blocked_source_is_not_due(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            workspace = Path(temporary)
-            blocked = workspace / crawler_directory(self.URLS[0]) / "BLOCKED.md"
-            blocked.parent.mkdir(parents=True)
-            attempted = date.today() - timedelta(days=5)
-            blocked.write_text(blocked_text(self.URLS[0], "CZ", attempted), encoding="utf-8")
-
-            selected = select_urls(self.URLS, workspace, {"urls": {}}, date.today(), 1)
-
-        self.assertEqual(selected, [self.URLS[1]])
-
-    def test_failure_backoff_skips_url(self):
-        state = {
-            "urls": {
-                self.URLS[0]: {
-                    "next_attempt_at": (date.today() + timedelta(days=7)).isoformat()
-                }
-            }
+    def test_versioned_seeds_cover_every_existing_crawler_directory(self):
+        root = Path(__file__).parents[1]
+        seeded_paths = set()
+        for seed in sorted((root / "seeds/crawler_sources").glob("*.csv")):
+            with seed.open(newline="", encoding="utf-8") as handle:
+                for row in csv.DictReader(handle):
+                    path = row["crawler_path"]
+                    if not path:
+                        source_url = row["canonical_url"] or row["url"]
+                        path = (
+                            f"crawlers/{row['country_code'].lower()}/"
+                            f"{crawler_folder_name(source_url)}"
+                        )
+                    self.assertNotIn(path, seeded_paths)
+                    seeded_paths.add(path)
+        existing_paths = {
+            marker.parent.relative_to(root).as_posix()
+            for marker in (
+                list((root / "crawlers").glob("*/*/main.py"))
+                + list((root / "crawlers").glob("*/*/BLOCKED.md"))
+            )
         }
-        with tempfile.TemporaryDirectory() as temporary:
-            selected = select_urls(self.URLS, Path(temporary), state, date.today(), 1)
+        self.assertTrue(
+            existing_paths.issubset(seeded_paths),
+            existing_paths - seeded_paths,
+        )
+        with (
+            root / "seeds/crawler_sources/0002_existing_crawlers.csv"
+        ).open(newline="", encoding="utf-8") as handle:
+            existing_seed_paths = {
+                row["crawler_path"] for row in csv.DictReader(handle)
+            }
+        self.assertTrue(
+            existing_seed_paths.issubset(existing_paths),
+            existing_seed_paths - existing_paths,
+        )
 
-        self.assertEqual(selected, [self.URLS[1]])
 
-    def test_invalid_state_file_falls_back_to_empty_state(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "state.json"
-            path.write_text("{not json", encoding="utf-8")
-            self.assertEqual(load_state(path), {"urls": {}})
+class PullRequestReconciliationTests(unittest.TestCase):
+    class Registry:
+        def __init__(self):
+            self.transitions = []
+
+        def pr_open_sources(self):
+            return [
+                {
+                    "id": 1,
+                    "crawler_path": "crawlers/cz/example_cz",
+                    "pull_request_url": "https://github.com/example/repo/pull/1",
+                }
+            ]
+
+        def transition_sources(self, source_ids, status, retry_after=None):
+            self.transitions.append((source_ids, status, retry_after))
+
+    def test_closed_unmerged_pr_retries(self):
+        registry = self.Registry()
+        response = subprocess.CompletedProcess(
+            [],
+            0,
+            json.dumps({"state": "CLOSED", "mergedAt": None, "statusCheckRollup": []}),
+            "",
+        )
+        with patch.object(factory, "run_command", return_value=response):
+            counts = reconcile_pull_requests(registry, Path.cwd())
+        self.assertEqual(counts["retry_wait"], 1)
+        self.assertEqual(registry.transitions[0][1], "retry_wait")
+
+    def test_failed_open_pr_needs_attention(self):
+        registry = self.Registry()
+        response = subprocess.CompletedProcess(
+            [],
+            0,
+            json.dumps(
+                {
+                    "state": "OPEN",
+                    "mergedAt": None,
+                    "statusCheckRollup": [{"conclusion": "FAILURE"}],
+                }
+            ),
+            "",
+        )
+        with patch.object(factory, "run_command", return_value=response):
+            counts = reconcile_pull_requests(registry, Path.cwd())
+        self.assertEqual(counts["needs_attention"], 1)
+        self.assertEqual(registry.transitions[0][1], "needs_attention")
 
 
 class ScopeTests(unittest.TestCase):
@@ -177,6 +251,13 @@ class ScopeTests(unittest.TestCase):
 
 
 class AttemptTests(unittest.TestCase):
+    SOURCE = {
+        "id": 12,
+        "canonical_url": "https://www.hamu.cz/",
+        "country_code": "CZ",
+        "crawler_path": "crawlers/cz/hamu_cz",
+    }
+
     def test_nonzero_builder_result_is_preserved_when_scope_is_valid(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -199,10 +280,10 @@ class AttemptTests(unittest.TestCase):
                 patch.object(factory, "run_command", side_effect=fake_run_command),
                 patch.object(factory, "git_commit", return_value="abc123"),
             ):
-                result = attempt_url(
+                result = attempt_source(
                     workspace,
                     run_dir,
-                    "https://www.hamu.cz/",
+                    self.SOURCE,
                     30,
                     {},
                 )
@@ -233,10 +314,10 @@ class AttemptTests(unittest.TestCase):
                 patch.object(factory, "run_command", side_effect=fake_run_command),
                 patch.object(factory, "git_commit", return_value="abc123"),
             ):
-                result = attempt_url(
+                result = attempt_source(
                     workspace,
                     run_dir,
-                    "https://www.hamu.cz/",
+                    self.SOURCE,
                     1,
                     {},
                 )
