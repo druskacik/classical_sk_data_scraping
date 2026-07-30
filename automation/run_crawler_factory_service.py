@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 DEFAULT_SERVICE_STATE_PATH = Path("/var/lib/crawler-factory/service-state.json")
-DEFAULT_REPOSITORY = "https://github.com/druskacik/classical_sk_data_scraping.git"
+DEFAULT_REPOSITORY = "https://github.com/druskacik/classical_bot.git"
 COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 

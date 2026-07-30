@@ -55,7 +55,7 @@ the factory container does not listen on a public port.
 In the factory app's **Deployment** tab:
 
 1. Configure the repository as
-   `github.com/druskacik/classical_sk_data_scraping`.
+   `github.com/druskacik/classical_bot`.
 2. Configure the branch as `master`.
 3. Set the captain-definition path to
    `./captain-definition-crawler-factory`.
