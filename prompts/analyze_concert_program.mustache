@@ -40,6 +40,8 @@ An unresolved entry must never contain a proposed catalogue entity. For example,
 
 For complete results, provide concise evidence copied or paraphrased from the programme and the URL where it was found. Use full canonical composer names and standard English canonical work titles for proposed new entities. Set existing IDs to null only after using the lookup commands and finding no match.
 
-As a secondary best-effort task, compare the exact concert occurrence on the live page with the stored event details. Return an event_updates entry only when the page explicitly shows a different value for event_status, date, time_from, time_to, city, country_code, or venue. Otherwise return an empty event_updates list. Do not infer a correction from omitted, unclear, generic, or festival-level information.
+As a secondary best-effort task, compare the exact concert occurrence with the stored event details. Return an event_updates entry only when the live page shows that a stored value is factually wrong. Treat abbreviations, translations, alternate spellings, formatting differences, and broader or more specific names for the same place as unchanged. In particular, a building, stage, or hall within the stored venue is not a venue correction. Propose a venue update only for a clearly different physical venue. Otherwise return an empty event_updates list.
+
+Do not infer corrections from omitted, unclear, generic, festival-level, or production-level information.
 
 Use scheduled, cancelled, postponed, or rescheduled for event_status; YYYY-MM-DD for dates; HH:MM for times; and uppercase ISO alpha-2 country codes. Every update must include the live source URL and concise evidence tied to this exact concert and date. Event status is independent from programme status: a cancelled concert may still have an extractable published programme. Never let uncertainty about event details reduce or block the composer/work extraction.
