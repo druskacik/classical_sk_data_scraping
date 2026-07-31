@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, time
 from unittest.mock import MagicMock, patch
 
 from agent_utils.concert_catalog import normalize
@@ -32,6 +32,12 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertIn("Keep uncertainty local", prompt)
         self.assertIn("Divertimento in D major (selection)", prompt)
         self.assertIn("without a Köchel number", prompt)
+        self.assertIn("Your primary task is the composer and work extraction", prompt)
+        self.assertIn("Otherwise return an empty event_updates list", prompt)
+        self.assertLess(
+            prompt.index("Your primary task is the composer and work extraction"),
+            prompt.index("As a secondary best-effort task"),
+        )
         self.assertLess(prompt.index("URL: https://example.test/event"), prompt.index("fallback"))
 
     def test_no_program_result_must_not_include_program_entries(self):
@@ -350,6 +356,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
                 "composers": [],
                 "program": [],
                 "unresolved_program": [],
+                "event_updates": [],
             }
         )
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
@@ -386,6 +393,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "composers": [],
             "program": [],
             "unresolved_program": [],
+            "event_updates": [],
         }
         codex_class.return_value.__enter__.return_value = MagicMock()
         with patch("sys.stdout", new_callable=io.StringIO):
@@ -402,6 +410,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertIn("partial", analyzer.OUTPUT_SCHEMA["properties"]["status"]["enum"])
         self.assertIn("composers", analyzer.OUTPUT_SCHEMA["required"])
         self.assertIn("unresolved_program", analyzer.OUTPUT_SCHEMA["required"])
+        self.assertIn("event_updates", analyzer.OUTPUT_SCHEMA["required"])
         item = analyzer.OUTPUT_SCHEMA["properties"]["program"]["items"]
         self.assertEqual(
             item["required"],
@@ -412,6 +421,225 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             unresolved["required"],
             ["programme_label", "evidence", "reason"],
         )
+        event_update = analyzer.OUTPUT_SCHEMA["properties"]["event_updates"]["items"]
+        self.assertEqual(
+            event_update["required"],
+            ["field", "new_value", "source_url", "evidence"],
+        )
+
+    def test_validates_supported_event_updates_and_rejects_unchanged_values(self):
+        conn = MagicMock()
+        concert = analyzer.Concert(
+            1,
+            "Test",
+            date(2026, 8, 1),
+            "https://example.test",
+            None,
+            time(19, 0),
+            None,
+            "Praha",
+            "CZ",
+            "Old Hall",
+            "scheduled",
+        )
+        updates = [
+            {
+                "field": "time_from",
+                "new_value": "20:00",
+                "source_url": concert.url,
+                "evidence": "The event page gives 20:00.",
+            },
+            {
+                "field": "city",
+                "new_value": "Praha",
+                "source_url": concert.url,
+                "evidence": "The event page says Praha.",
+            },
+        ]
+
+        accepted = analyzer.validate_event_updates(conn, concert, updates)
+
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(accepted[0]["field"], "time_from")
+        self.assertEqual(accepted[0]["db_value"], time(20, 0))
+
+    def test_rejects_date_update_that_would_duplicate_a_concert(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = (1,)
+        concert = analyzer.Concert(
+            1,
+            "Test",
+            date(2026, 8, 1),
+            "https://example.test",
+            None,
+        )
+
+        accepted = analyzer.validate_event_updates(
+            conn,
+            concert,
+            [
+                {
+                    "field": "date",
+                    "new_value": "2026-08-02",
+                    "source_url": concert.url,
+                    "evidence": "The event page gives 2 August.",
+                }
+            ],
+        )
+
+        self.assertEqual(accepted, [])
+
+    def test_persists_event_update_with_audit_and_verification_timestamp(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = None
+        concert = analyzer.Concert(
+            1,
+            "Test",
+            date(2026, 8, 1),
+            "https://example.test",
+            None,
+        )
+        result = {
+            "status": "no_program",
+            "source_url": concert.url,
+            "notes": "No programme published.",
+            "composers": [],
+            "program": [],
+            "unresolved_program": [],
+            "event_updates": [],
+        }
+        event_updates = [
+            {
+                "field": "event_status",
+                "db_value": "cancelled",
+                "new_value": "cancelled",
+                "old_value": "scheduled",
+                "source_url": concert.url,
+                "evidence": "The organizer marks the event as cancelled.",
+            }
+        ]
+
+        analyzer.persist_result(
+            conn,
+            concert,
+            result,
+            "gpt-5.6-terra",
+            event_updates,
+        )
+
+        queries = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertTrue(any("last_verified_at = now()" in query for query in queries))
+        status_update = next(query for query in queries if "event_status = %s" in query)
+        self.assertIn("event_status_updated_at = now()", status_update)
+        self.assertTrue(any("INSERT INTO classical_concert_change" in query for query in queries))
+        conn.commit.assert_called_once()
+
+    def test_page_unavailable_does_not_mark_concert_verified(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = None
+        concert = analyzer.Concert(
+            1,
+            "Test",
+            date(2026, 8, 1),
+            "https://example.test",
+            None,
+        )
+        result = {
+            "status": "page_unavailable",
+            "source_url": concert.url,
+            "notes": "The page could not be opened.",
+            "composers": [],
+            "program": [],
+            "unresolved_program": [],
+            "event_updates": [],
+        }
+
+        analyzer.persist_result(conn, concert, result, "gpt-5.6-terra")
+
+        queries = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertFalse(any("last_verified_at = now()" in query for query in queries))
+
+    def test_invalid_event_update_does_not_block_programme_result(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = None
+        concert = analyzer.Concert(
+            1,
+            "Test",
+            date(2026, 8, 1),
+            "https://example.test",
+            None,
+        )
+        result = {
+            "status": "no_program",
+            "source_url": concert.url,
+            "notes": "No programme published.",
+            "composers": [],
+            "program": [],
+            "unresolved_program": [],
+            "event_updates": [
+                {
+                    "field": "time_from",
+                    "new_value": "eight o'clock",
+                    "source_url": concert.url,
+                    "evidence": "Unparseable time.",
+                }
+            ],
+        }
+
+        analyzer.persist_result(conn, concert, result, "gpt-5.6-terra")
+
+        queries = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertTrue(any("INSERT INTO concert_program_analysis" in query for query in queries))
+        self.assertFalse(any("INSERT INTO classical_concert_change" in query for query in queries))
+        conn.commit.assert_called_once()
+
+    def test_degraded_programme_retry_still_applies_event_update(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = ("partial",)
+        concert = analyzer.Concert(
+            1,
+            "Test",
+            date(2026, 8, 1),
+            "https://example.test",
+            None,
+        )
+        result = {
+            "status": "no_program",
+            "source_url": concert.url,
+            "notes": "Programme was removed from the page.",
+            "composers": [],
+            "program": [],
+            "unresolved_program": [],
+            "event_updates": [],
+        }
+        event_updates = [
+            {
+                "field": "event_status",
+                "db_value": "cancelled",
+                "new_value": "cancelled",
+                "old_value": "scheduled",
+                "source_url": concert.url,
+                "evidence": "The event is cancelled.",
+            }
+        ]
+
+        analyzer.persist_result(
+            conn,
+            concert,
+            result,
+            "gpt-5.6-terra",
+            event_updates,
+        )
+
+        queries = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertTrue(any("INSERT INTO classical_concert_change" in query for query in queries))
+        self.assertTrue(any("UPDATE concert_program_analysis" in query for query in queries))
+        self.assertFalse(any("DELETE FROM classical_concert_work" in query for query in queries))
 
     def test_model_validation_falls_back_to_local_catalogue(self):
         codex = MagicMock()

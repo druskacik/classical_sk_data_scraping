@@ -26,6 +26,12 @@ Base = declarative_base(metadata=metadata)
 
 class ClassicalConcert(Base):
     __tablename__ = "classical_concert"
+    __table_args__ = (
+        CheckConstraint(
+            "event_status IN ('scheduled', 'cancelled', 'postponed', 'rescheduled')",
+            name="ck_classical_concert_event_status",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
     title = Column(String, nullable=False)
@@ -45,6 +51,9 @@ class ClassicalConcert(Base):
     is_concert_details_filled = Column(Boolean, server_default="false")
     composers = Column(ARRAY(Text))
     program_analysis_eligible = Column(Boolean, nullable=False, server_default="true")
+    event_status = Column(String, nullable=False, server_default="scheduled")
+    event_status_updated_at = Column(DateTime(timezone=True))
+    last_verified_at = Column(DateTime(timezone=True))
 
 
 class PotentialEvent(Base):
@@ -145,6 +154,36 @@ class ConcertProgramAnalysis(Base):
     last_error = Column(Text)
     last_attempted_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
+
+
+class ClassicalConcertChange(Base):
+    __tablename__ = "classical_concert_change"
+    __table_args__ = (
+        CheckConstraint(
+            "field_name IN ('event_status', 'date', 'time_from', 'time_to', "
+            "'city', 'country_code', 'venue')",
+            name="ck_classical_concert_change_field",
+        ),
+        Index(
+            "ix_classical_concert_change_concert_created",
+            "classical_concert_id",
+            "created_at",
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True)
+    classical_concert_id = Column(
+        Integer,
+        ForeignKey("classical_concert.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    field_name = Column(String, nullable=False)
+    old_value = Column(JSONB)
+    new_value = Column(JSONB, nullable=False)
+    source_url = Column(Text, nullable=False)
+    evidence = Column(Text, nullable=False)
+    model = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 CRAWLER_SOURCE_STATUSES = (

@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import threading
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,16 @@ MAX_AUTOMATIC_ATTEMPTS = 3
 NO_PROGRAM_RETRY_INTERVAL_DAYS = 7
 ADVISORY_LOCK_NAME = "classical-sk-concert-program-analysis"
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "analyze_concert_program.mustache"
+EVENT_UPDATE_FIELDS = (
+    "event_status",
+    "date",
+    "time_from",
+    "time_to",
+    "city",
+    "country_code",
+    "venue",
+)
+EVENT_STATUSES = ("scheduled", "cancelled", "postponed", "rescheduled")
 
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -101,8 +112,30 @@ OUTPUT_SCHEMA: dict[str, Any] = {
                 "required": ["programme_label", "evidence", "reason"],
             },
         },
+        "event_updates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "field": {"type": "string", "enum": list(EVENT_UPDATE_FIELDS)},
+                    "new_value": {"type": "string"},
+                    "source_url": {"type": "string"},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["field", "new_value", "source_url", "evidence"],
+            },
+        },
     },
-    "required": ["status", "source_url", "notes", "composers", "program", "unresolved_program"],
+    "required": [
+        "status",
+        "source_url",
+        "notes",
+        "composers",
+        "program",
+        "unresolved_program",
+        "event_updates",
+    ],
 }
 
 
@@ -113,6 +146,12 @@ class Concert:
     date: date
     url: str
     description: str | None
+    time_from: time | None = None
+    time_to: time | None = None
+    city: str | None = None
+    country_code: str | None = None
+    venue: str | None = None
+    event_status: str = "scheduled"
 
 
 def get_connection():
@@ -135,6 +174,20 @@ def render_prompt(concert: Concert) -> str:
             "date": concert.date.isoformat(),
             "url": concert.url,
             "description": concert.description or "(not available)",
+            "time_from": (
+                concert.time_from.isoformat(timespec="minutes")
+                if concert.time_from
+                else "(not available)"
+            ),
+            "time_to": (
+                concert.time_to.isoformat(timespec="minutes")
+                if concert.time_to
+                else "(not available)"
+            ),
+            "city": concert.city or "(not available)",
+            "country_code": concert.country_code or "(not available)",
+            "venue": concert.venue or "(not available)",
+            "event_status": concert.event_status,
         },
     )
 
@@ -144,7 +197,9 @@ def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool
         if concert_ids:
             cursor.execute(
                 """
-                SELECT c.id, c.title, c.date, c.url, c.description
+                SELECT c.id, c.title, c.date, c.url, c.description,
+                       c.time_from, c.time_to, c.city, c.country_code, c.venue,
+                       c.event_status
                 FROM classical_concert c
                 LEFT JOIN concert_program_analysis a ON a.classical_concert_id = c.id
                 WHERE c.id = ANY(%s)
@@ -157,7 +212,9 @@ def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool
         else:
             cursor.execute(
                 """
-                SELECT c.id, c.title, c.date, c.url, c.description
+                SELECT c.id, c.title, c.date, c.url, c.description,
+                       c.time_from, c.time_to, c.city, c.country_code, c.venue,
+                       c.event_status
                 FROM classical_concert c
                 LEFT JOIN concert_program_analysis a ON a.classical_concert_id = c.id
                 WHERE c.program_analysis_eligible = true
@@ -305,6 +362,92 @@ def validate_result(conn, concert: Concert, result: dict[str, Any]) -> None:
                     raise ValueError("Existing work does not belong to the selected existing composer")
 
 
+def validate_event_updates(
+    conn,
+    concert: Concert,
+    updates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    accepted = []
+    seen_fields = set()
+    current_values = {
+        "event_status": concert.event_status,
+        "date": concert.date,
+        "time_from": concert.time_from,
+        "time_to": concert.time_to,
+        "city": concert.city,
+        "country_code": concert.country_code,
+        "venue": concert.venue,
+    }
+    for update in updates:
+        try:
+            field = update["field"]
+            if field in seen_fields:
+                raise ValueError(f"duplicate update for {field}")
+            seen_fields.add(field)
+            source_url = update["source_url"].strip()
+            evidence = update["evidence"].strip()
+            raw_value = update["new_value"].strip()
+            if not source_url or not evidence or not raw_value:
+                raise ValueError("new_value, source_url, and evidence must not be empty")
+
+            if field == "event_status":
+                if raw_value not in EVENT_STATUSES:
+                    raise ValueError(f"unsupported event status {raw_value!r}")
+                db_value = raw_value
+            elif field == "date":
+                db_value = date.fromisoformat(raw_value)
+            elif field in {"time_from", "time_to"}:
+                if not re.fullmatch(r"\d{2}:\d{2}", raw_value):
+                    raise ValueError("times must use HH:MM")
+                db_value = time.fromisoformat(raw_value)
+            elif field == "country_code":
+                if not re.fullmatch(r"[A-Z]{2}", raw_value):
+                    raise ValueError("country_code must be an uppercase ISO alpha-2 code")
+                db_value = raw_value
+            elif field in {"city", "venue"}:
+                db_value = raw_value
+            else:
+                raise ValueError(f"unsupported event field {field!r}")
+
+            if db_value == current_values[field]:
+                raise ValueError("proposed value is unchanged")
+            if field == "date":
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT 1
+                        FROM classical_concert
+                        WHERE id <> %s AND title = %s AND url = %s AND date = %s
+                        LIMIT 1
+                        """,
+                        (concert.id, concert.title, concert.url, db_value),
+                    )
+                    if cursor.fetchone() is not None:
+                        raise ValueError("another concert already has the proposed title, URL, and date")
+
+            accepted.append(
+                {
+                    "field": field,
+                    "db_value": db_value,
+                    "new_value": raw_value,
+                    "source_url": source_url,
+                    "evidence": evidence,
+                    "old_value": _json_event_value(current_values[field]),
+                }
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            print(f"Ignoring invalid event update for concert {concert.id}: {error}")
+    return accepted
+
+
+def _json_event_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (date, time)):
+        return value.isoformat(timespec="minutes") if isinstance(value, time) else value.isoformat()
+    return str(value)
+
+
 def _validate_composer(cursor, composer: dict[str, Any]) -> None:
     if not composer["name"].strip():
         raise ValueError("Composer names must not be empty")
@@ -413,11 +556,65 @@ def replace_catalogue_links(cursor, concert_id: int, result: dict[str, Any]) -> 
         )
 
 
-def persist_result(conn, concert: Concert, result: dict[str, Any], model: str) -> None:
+def apply_event_updates(
+    cursor,
+    concert: Concert,
+    updates: list[dict[str, Any]],
+    model: str,
+) -> None:
+    for update in updates:
+        field = update["field"]
+        status_timestamp = (
+            ", event_status_updated_at = now()" if field == "event_status" else ""
+        )
+        cursor.execute(
+            f"""
+            UPDATE classical_concert
+            SET {field} = %s,
+                updated_at = now()
+                {status_timestamp}
+            WHERE id = %s
+            """,
+            (update["db_value"], concert.id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO classical_concert_change
+                (classical_concert_id, field_name, old_value, new_value,
+                 source_url, evidence, model)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                concert.id,
+                field,
+                Json(update["old_value"]),
+                Json(update["new_value"]),
+                update["source_url"],
+                update["evidence"],
+                model,
+            ),
+        )
+
+
+def persist_result(
+    conn,
+    concert: Concert,
+    result: dict[str, Any],
+    model: str,
+    event_updates: list[dict[str, Any]] | None = None,
+) -> None:
     status = result["status"]
     completed = status in {"complete", "composer_only", "expired_no_program", "failed"}
+    if event_updates is None:
+        event_updates = validate_event_updates(conn, concert, result.get("event_updates", []))
     try:
         with conn.cursor() as cursor:
+            if status != "page_unavailable":
+                cursor.execute(
+                    "UPDATE classical_concert SET last_verified_at = now() WHERE id = %s",
+                    (concert.id,),
+                )
+            apply_event_updates(cursor, concert, event_updates, model)
             cursor.execute(
                 "SELECT status FROM concert_program_analysis WHERE classical_concert_id = %s",
                 (concert.id,),
@@ -564,9 +761,14 @@ def run(
                 try:
                     result = run_agent(codex, concert, model, timeout_seconds)
                     validate_result(conn, concert, result)
+                    event_updates = validate_event_updates(
+                        conn,
+                        concert,
+                        result["event_updates"],
+                    )
                     print(json.dumps({"concert_id": concert.id, **result}, ensure_ascii=False, indent=2))
                     if commit:
-                        persist_result(conn, concert, result, model)
+                        persist_result(conn, concert, result, model, event_updates)
                     else:
                         print("DRY RUN: no database changes made")
                 except Exception as error:
