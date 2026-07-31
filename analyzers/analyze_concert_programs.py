@@ -21,8 +21,8 @@ from agent_utils.concert_catalog import normalize
 
 load_dotenv()
 
-DEFAULT_MODEL = "gpt-5.6-terra"
-DEFAULT_LIMIT = 25
+DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_LIMIT = 200
 DEFAULT_TIMEOUT_SECONDS = 600
 MAX_AUTOMATIC_ATTEMPTS = 3
 NO_PROGRAM_RETRY_INTERVAL_DAYS = 7
