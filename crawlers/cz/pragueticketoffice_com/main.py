@@ -222,11 +222,7 @@ class PragueTicketOfficeCrawler(BaseCrawler):
 
 
 def main():
-    crawler = PragueTicketOfficeCrawler()
-    concerts = crawler.scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts[:5]:
-        print(concert)
+    PragueTicketOfficeCrawler().run()
 
 
 if __name__ == '__main__':

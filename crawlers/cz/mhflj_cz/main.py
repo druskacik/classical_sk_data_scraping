@@ -178,11 +178,7 @@ class MhfljCrawler(BaseCrawler):
 
 
 def main():
-    concerts = MhfljCrawler().scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts:
-        print(concert)
-    return concerts
+    MhfljCrawler().run()
 
 
 if __name__ == '__main__':

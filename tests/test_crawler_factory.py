@@ -443,6 +443,11 @@ class PullRequestScopeTests(unittest.TestCase):
             main_path = workspace / directory / "main.py"
             main_path.parent.mkdir(parents=True)
             main_path.write_text(
+                "class Crawler:\n"
+                "    def run(self):\n"
+                "        raise RuntimeError('must not execute')\n"
+                "def main():\n"
+                "    Crawler().run()\n"
                 "raise RuntimeError('must not execute')\n",
                 encoding="utf-8",
             )
@@ -450,6 +455,56 @@ class PullRequestScopeTests(unittest.TestCase):
             result = validate_directory(workspace, directory)
 
         self.assertEqual(result, {"status": "passed", "kind": "crawler"})
+
+    def test_main_may_run_a_named_crawler_instance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            directory = Path("crawlers/cz/example_cz")
+            main_path = workspace / directory / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text(
+                "def main():\n"
+                "    crawler = ExampleCrawler()\n"
+                "    crawler.run()\n",
+                encoding="utf-8",
+            )
+
+            result = validate_directory(workspace, directory)
+
+        self.assertEqual(result, {"status": "passed", "kind": "crawler"})
+
+    def test_missing_main_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            directory = Path("crawlers/cz/example_cz")
+            main_path = workspace / directory / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text("ExampleCrawler().run()\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(PullRequestValidationError, "top-level main"):
+                validate_directory(workspace, directory)
+
+    def test_scrape_only_main_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            directory = Path("crawlers/cz/example_cz")
+            main_path = workspace / directory / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text(
+                "def main():\n"
+                "    concerts = ExampleCrawler().scrape()\n"
+                "    print(concerts)\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(PullRequestValidationError, "must call.*run"):
+                validate_directory(workspace, directory)
+
+    def test_every_existing_crawler_has_a_persisting_main(self):
+        root = Path(__file__).parents[1]
+        for main_path in sorted((root / "crawlers").glob("*/*/main.py")):
+            with self.subTest(crawler=main_path.parent.relative_to(root)):
+                validate_directory(root, main_path.parent.relative_to(root))
 
     def test_invalid_python_syntax_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

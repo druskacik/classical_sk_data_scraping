@@ -231,10 +231,7 @@ class NdBrnoCrawler(BaseCrawler):
 
 
 def main():
-    concerts = NdBrnoCrawler().scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts:
-        print(concert)
+    NdBrnoCrawler().run()
 
 
 if __name__ == '__main__':

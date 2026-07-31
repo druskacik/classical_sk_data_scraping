@@ -219,10 +219,7 @@ class FilharmonieBrnoCrawler(BaseCrawler):
 
 
 def main():
-    concerts = FilharmonieBrnoCrawler().scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts:
-        print(concert)
+    FilharmonieBrnoCrawler().run()
 
 
 if __name__ == '__main__':

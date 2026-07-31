@@ -28,6 +28,12 @@ other crawlers. Do not commit or push changes.
 Implement the crawler as a `BaseCrawler` subclass with a `scrape()` method.
 During investigation and testing call `scrape()` directly. Do not call
 `BaseCrawler.run()`, upload data, connect to the database, or write a CSV.
+This restriction applies only to investigation and testing. The committed
+module is a production crawler: it must define a top-level `main()` function
+that calls the crawler instance's `run()` method so the normal scheduler saves
+the CSV and uploads the records. Also call `main()` from an
+`if __name__ == '__main__':` guard. Do not use a scrape-only or print-only
+implementation of `main()`.
 If retrying a directory that already contains `BLOCKED.md`, delete
 `BLOCKED.md` when a working `main.py` is successfully created. Never leave
 both files in the directory.

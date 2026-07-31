@@ -146,10 +146,7 @@ class EbczCrawler(BaseCrawler):
 
 
 def main():
-    concerts = EbczCrawler().scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts:
-        print(concert)
+    EbczCrawler().run()
 
 
 if __name__ == '__main__':

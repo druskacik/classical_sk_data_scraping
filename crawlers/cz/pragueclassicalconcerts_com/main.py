@@ -193,11 +193,7 @@ class PragueClassicalConcertsCrawler(BaseCrawler):
 
 
 def main():
-    crawler = PragueClassicalConcertsCrawler()
-    concerts = crawler.scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts[:5]:
-        print(concert)
+    PragueClassicalConcertsCrawler().run()
 
 
 if __name__ == '__main__':

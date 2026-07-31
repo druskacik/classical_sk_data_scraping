@@ -231,10 +231,7 @@ class NdmCrawler(BaseCrawler):
 
 
 def main():
-    concerts = NdmCrawler().scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts:
-        print(concert)
+    NdmCrawler().run()
 
 
 if __name__ == '__main__':

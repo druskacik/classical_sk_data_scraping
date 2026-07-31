@@ -155,10 +155,7 @@ class CfsBrnoCrawler(BaseCrawler):
 
 
 def main():
-    concerts = CfsBrnoCrawler().scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts:
-        print(concert)
+    CfsBrnoCrawler().run()
 
 
 if __name__ == '__main__':

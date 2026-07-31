@@ -186,10 +186,7 @@ class KonzervatorBrnoCrawler(BaseCrawler):
 
 
 def main():
-    concerts = KonzervatorBrnoCrawler().scrape()
-    print(f'Found {len(concerts)} concerts')
-    for concert in concerts:
-        print(concert)
+    KonzervatorBrnoCrawler().run()
 
 
 if __name__ == '__main__':

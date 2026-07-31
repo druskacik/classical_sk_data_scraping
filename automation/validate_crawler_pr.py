@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -92,11 +93,34 @@ def validate_directory(workspace: Path, directory: Path) -> dict:
         return {"status": "passed", "kind": "blocked"}
     source = main_path.read_text(encoding="utf-8")
     try:
-        compile(source, str(main_path), "exec")
+        tree = ast.parse(source, str(main_path))
     except SyntaxError as exc:
         raise PullRequestValidationError(
             f"{directory} has invalid Python syntax: {exc}"
         ) from exc
+    main_function = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "main"
+        ),
+        None,
+    )
+    if main_function is None:
+        raise PullRequestValidationError(
+            f"{directory} must define a top-level main() function"
+        )
+    calls_run = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run"
+        for node in ast.walk(main_function)
+    )
+    if not calls_run:
+        raise PullRequestValidationError(
+            f"{directory} main() must call the crawler's run() method"
+        )
     return {"status": "passed", "kind": "crawler"}
 
 
