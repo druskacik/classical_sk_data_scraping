@@ -1,7 +1,11 @@
 FROM python:3.12-slim
 
+ARG CAPROVER_GIT_COMMIT_SHA
+
 # Set the working directory
 WORKDIR /app
+
+ENV CAPROVER_GIT_COMMIT_SHA=${CAPROVER_GIT_COMMIT_SHA}
 
 # Copy the pyproject.toml and other necessary files
 COPY pyproject.toml ./
@@ -24,6 +28,8 @@ RUN ln -s "$(python -c 'from codex_cli_bin import bundled_codex_path; print(bund
 
 # Copy the rest of the application code
 COPY . .
+
+VOLUME ["/var/lib/classical-bot"]
 
 # Apply database migrations before starting the application.
 CMD ["sh", "-c", "alembic upgrade head && exec python main.py"]

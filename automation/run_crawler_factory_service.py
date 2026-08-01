@@ -1,23 +1,26 @@
 from __future__ import annotations
 
-import json
 import os
-import re
 import signal
 import subprocess
 import sys
 import threading
 import time
-import urllib.request
 from dataclasses import dataclass
-from datetime import UTC, datetime, time as wall_time
+from datetime import datetime, time as wall_time
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from deployment.caprover_updater import (
+    CapRoverUpdater,
+    CapRoverUpdaterConfig,
+    load_state,
+    save_state,
+)
 
 
 DEFAULT_SERVICE_STATE_PATH = Path("/var/lib/crawler-factory/service-state.json")
 DEFAULT_REPOSITORY = "https://github.com/druskacik/classical_bot.git"
-COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 
 def log(message: str) -> None:
@@ -86,21 +89,11 @@ class ServiceConfig:
 
 
 def load_service_state(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        log(f"Ignoring unreadable service state at {path}")
-        return {}
-    return state if isinstance(state, dict) else {}
+    return load_state(path, log)
 
 
 def save_service_state(path: Path, state: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    save_state(path, state)
 
 
 def batch_is_due(now: datetime, schedule_time: wall_time, state: dict) -> bool:
@@ -108,39 +101,6 @@ def batch_is_due(now: datetime, schedule_time: wall_time, state: dict) -> bool:
         now.time() >= schedule_time
         and state.get("last_factory_attempt_date") != now.date().isoformat()
     )
-
-
-def normalize_commit_sha(value: str, source: str) -> str:
-    normalized = value.strip().lower()
-    if not COMMIT_SHA_PATTERN.fullmatch(normalized):
-        raise ValueError(f"{source} is not a 40-character hexadecimal commit SHA")
-    return normalized
-
-
-def remote_commit(repository: str, branch: str = "master") -> str:
-    result = subprocess.run(
-        ["git", "ls-remote", repository, f"refs/heads/{branch}"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    fields = result.stdout.split()
-    if len(fields) < 2:
-        raise RuntimeError(f"Remote branch {branch!r} was not found")
-    return normalize_commit_sha(fields[0], f"remote branch {branch!r}")
-
-
-def request_deployment(webhook: str) -> None:
-    request = urllib.request.Request(
-        webhook,
-        data=b"{}",
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        if not 200 <= response.status < 300:
-            raise RuntimeError(f"CapRover webhook returned HTTP {response.status}")
 
 
 def prepare_git_authentication() -> None:
@@ -161,10 +121,18 @@ def prepare_git_authentication() -> None:
 class FactoryService:
     def __init__(self, config: ServiceConfig) -> None:
         self.config = config
-        self.state = load_service_state(config.state_path)
+        self.updater = CapRoverUpdater(
+            CapRoverUpdaterConfig(
+                repository=config.repository,
+                deploy_webhook=config.deploy_webhook,
+                webhook_environment_name="CRAWLER_FACTORY_DEPLOY_WEBHOOK",
+                state_path=config.state_path,
+            ),
+            log,
+        )
+        self.state = self.updater.state
         self.stop_event = threading.Event()
         self.child: subprocess.Popen | None = None
-        self._configuration_warning_logged = False
 
     def stop(self, signum: int, _frame: object = None) -> None:
         log(f"Received signal {signum}; stopping")
@@ -174,7 +142,7 @@ class FactoryService:
 
     def run_factory(self, now: datetime) -> int:
         self.state["last_factory_attempt_date"] = now.date().isoformat()
-        save_service_state(self.config.state_path, self.state)
+        self.updater.save_state()
         command = [
             sys.executable,
             "-m",
@@ -209,49 +177,7 @@ class FactoryService:
     def check_for_update(self) -> bool:
         if self.child is not None and self.child.poll() is None:
             return False
-        deployed_commit_value = os.getenv("CAPROVER_GIT_COMMIT_SHA")
-        if not self.config.deploy_webhook or not deployed_commit_value:
-            if not self._configuration_warning_logged:
-                missing = []
-                if not self.config.deploy_webhook:
-                    missing.append("CRAWLER_FACTORY_DEPLOY_WEBHOOK")
-                if not deployed_commit_value:
-                    missing.append("CAPROVER_GIT_COMMIT_SHA")
-                log(f"Automatic updates disabled; missing {', '.join(missing)}")
-                self._configuration_warning_logged = True
-            return False
-        try:
-            deployed_commit = normalize_commit_sha(
-                deployed_commit_value,
-                "CAPROVER_GIT_COMMIT_SHA",
-            )
-        except ValueError as exc:
-            if not self._configuration_warning_logged:
-                log(f"Automatic updates disabled; {exc}")
-                self._configuration_warning_logged = True
-            return False
-        try:
-            latest_commit = remote_commit(self.config.repository)
-        except Exception as exc:
-            log(f"Could not check master for updates: {type(exc).__name__}: {exc}")
-            return False
-        if latest_commit == deployed_commit:
-            return False
-        if self.state.get("last_deploy_request_sha") == latest_commit:
-            return False
-        try:
-            request_deployment(self.config.deploy_webhook)
-        except Exception as exc:
-            log(f"Could not request CapRover deployment: {type(exc).__name__}: {exc}")
-            return False
-        self.state["last_deploy_request_sha"] = latest_commit
-        self.state["last_deploy_request_at"] = datetime.now(UTC).isoformat()
-        save_service_state(self.config.state_path, self.state)
-        log(
-            "Requested CapRover deployment for "
-            f"{latest_commit[:12]} (currently {deployed_commit[:12]})"
-        )
-        return True
+        return self.updater.check_for_update()
 
     def run(self) -> None:
         signal.signal(signal.SIGTERM, self.stop)

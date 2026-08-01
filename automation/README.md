@@ -6,6 +6,9 @@ process to finish, and only then asks CapRover to deploy a newer `master`
 commit. It therefore remains decoupled from the normal crawler runner and does
 not interrupt its own agents during automatic updates.
 
+SHA comparison, webhook delivery, retry state, and duplicate suppression are
+shared with the normal scraper runner through `deployment/caprover_updater.py`.
+
 Each batch clones `master` into a temporary directory, atomically claims at
 most five due sources from PostgreSQL, commits generated `main.py` or
 `BLOCKED.md` results, opens one pull request, and enables squash auto-merge.

@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import automation.run_crawler_factory_service as service
+import deployment.caprover_updater as caprover
 
 
 OLD_SHA = "a" * 40
@@ -117,8 +118,8 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(service, "remote_commit", return_value=OLD_SHA),
-                patch.object(service, "request_deployment") as deploy,
+                patch.object(caprover, "remote_commit", return_value=OLD_SHA),
+                patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertFalse(supervisor.check_for_update())
 
@@ -133,8 +134,8 @@ class FactoryServiceTests(unittest.TestCase):
                     {"CAPROVER_GIT_COMMIT_SHA": f"{OLD_SHA}\n"},
                     clear=True,
                 ),
-                patch.object(service, "remote_commit", return_value=OLD_SHA),
-                patch.object(service, "request_deployment") as deploy,
+                patch.object(caprover, "remote_commit", return_value=OLD_SHA),
+                patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertFalse(supervisor.check_for_update())
 
@@ -145,8 +146,8 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(service, "remote_commit", return_value=NEW_SHA),
-                patch.object(service, "request_deployment") as deploy,
+                patch.object(caprover, "remote_commit", return_value=NEW_SHA),
+                patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertTrue(supervisor.check_for_update())
 
@@ -159,8 +160,8 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(config)
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(service, "remote_commit", return_value=NEW_SHA),
-                patch.object(service, "request_deployment") as deploy,
+                patch.object(caprover, "remote_commit", return_value=NEW_SHA),
+                patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertTrue(supervisor.check_for_update())
                 restarted_supervisor = service.FactoryService(config)
@@ -175,9 +176,9 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(service, "remote_commit", return_value=NEW_SHA),
+                patch.object(caprover, "remote_commit", return_value=NEW_SHA),
                 patch.object(
-                    service,
+                    caprover,
                     "request_deployment",
                     side_effect=[RuntimeError("failed"), None],
                 ) as deploy,
@@ -196,8 +197,8 @@ class FactoryServiceTests(unittest.TestCase):
                     {"CAPROVER_GIT_COMMIT_SHA": "not-a-commit"},
                     clear=True,
                 ),
-                patch.object(service, "remote_commit") as remote,
-                patch.object(service, "request_deployment") as deploy,
+                patch.object(caprover, "remote_commit") as remote,
+                patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertFalse(supervisor.check_for_update())
 
@@ -209,7 +210,7 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary)))
             supervisor.child = Mock()
             supervisor.child.poll.return_value = None
-            with patch.object(service, "remote_commit") as remote:
+            with patch.object(caprover, "remote_commit") as remote:
                 self.assertFalse(supervisor.check_for_update())
 
         remote.assert_not_called()
@@ -253,7 +254,7 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary), webhook=None))
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(service, "remote_commit") as remote,
+                patch.object(caprover, "remote_commit") as remote,
             ):
                 self.assertFalse(supervisor.check_for_update())
 
