@@ -176,6 +176,24 @@ class Composer(Base):
     normalized_name = Column(String, nullable=False)
 
 
+class ComposerAlias(Base):
+    __tablename__ = "composer_alias"
+    __table_args__ = (
+        UniqueConstraint(
+            "composer_id",
+            "normalized_alias",
+            name="uq_composer_alias_composer_normalized",
+        ),
+        Index("ix_composer_alias_normalized", "normalized_alias"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    composer_id = Column(Integer, ForeignKey("composer.id", ondelete="CASCADE"), nullable=False)
+    alias = Column(Text, nullable=False)
+    normalized_alias = Column(Text, nullable=False)
+    language_code = Column(String(2))
+
+
 class ClassicalConcertComposer(Base):
     __tablename__ = "classical_concert_composer"
     __table_args__ = (

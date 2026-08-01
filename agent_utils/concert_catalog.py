@@ -29,14 +29,37 @@ def normalize(value: str) -> str:
 
 def find_composers(name: str, limit: int = 10) -> list[dict]:
     target = normalize(name)
+    if not target:
+        return []
     with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute("SELECT id, name, normalized_name FROM composer")
-        candidates = []
-        for composer_id, canonical_name, normalized_name in cursor.fetchall():
-            score = jellyfish.jaro_winkler_similarity(target, normalize(normalized_name or canonical_name))
-            if score >= 0.55:
-                candidates.append({"id": composer_id, "name": canonical_name, "score": round(score, 4)})
-    return sorted(candidates, key=lambda item: (-item["score"], item["name"]))[:limit]
+        cursor.execute(
+            """
+            SELECT c.id, c.name, c.normalized_name, a.alias, a.normalized_alias
+            FROM composer c
+            LEFT JOIN composer_alias a ON a.composer_id = c.id
+            """
+        )
+        candidates: dict[int, dict] = {}
+        for composer_id, canonical_name, normalized_name, alias, normalized_alias in cursor.fetchall():
+            searchable_names = [normalized_name or canonical_name]
+            if alias:
+                searchable_names.append(normalized_alias or alias)
+            score = 0.0
+            for candidate_name in searchable_names:
+                candidate = normalize(candidate_name)
+                candidate_score = jellyfish.jaro_winkler_similarity(target, candidate)
+                if target == candidate:
+                    candidate_score = 1.0
+                elif target in candidate or candidate in target:
+                    candidate_score = max(candidate_score, 0.95)
+                score = max(score, candidate_score)
+            if score >= 0.55 and score > candidates.get(composer_id, {}).get("score", -1):
+                candidates[composer_id] = {
+                    "id": composer_id,
+                    "name": canonical_name,
+                    "score": round(score, 4),
+                }
+    return sorted(candidates.values(), key=lambda item: (-item["score"], item["name"]))[:limit]
 
 
 def list_works(composer_id: int) -> list[dict]:

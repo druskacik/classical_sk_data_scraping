@@ -6,6 +6,7 @@ import unittest
 from datetime import date, time
 from unittest.mock import MagicMock, patch
 
+from agent_utils import concert_catalog
 from agent_utils.concert_catalog import normalize
 from analyzers import analyze_concert_programs as analyzer
 
@@ -28,6 +29,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertNotIn("uv run", prompt)
         self.assertIn("standard English title of the complete composition", prompt)
         self.assertIn("standard English name in programme_label", prompt)
+        self.assertIn("commonly established in English-language classical references", prompt)
         self.assertIn("original wording in evidence", prompt)
         self.assertIn("Keep uncertainty local", prompt)
         self.assertIn("Divertimento in D major (selection)", prompt)
@@ -39,6 +41,33 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             prompt.index("As a secondary best-effort task"),
         )
         self.assertLess(prompt.index("URL: https://example.test/event"), prompt.index("fallback"))
+
+    @patch.object(concert_catalog, "get_connection")
+    def test_composer_lookup_uses_alias_and_returns_canonical_name_once(self, get_connection):
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [
+            (5, "Pyotr Ilyich Tchaikovsky", "pyotr ilyich tchaikovsky", "Piotr Iľjič Čajkovskij", "piotr iljic cajkovskij"),
+            (5, "Pyotr Ilyich Tchaikovsky", "pyotr ilyich tchaikovsky", "P. I. Čajkovskij", "p i cajkovskij"),
+            (16, "Dmitri Shostakovich", "dmitri shostakovich", "Dmitrij Šostakovič", "dmitrij sostakovic"),
+        ]
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.cursor.return_value.__enter__.return_value = cursor
+        get_connection.return_value = connection
+
+        result = concert_catalog.find_composers("Piotr Iľjič Čajkovskij")
+
+        self.assertEqual(
+            result[0],
+            {"id": 5, "name": "Pyotr Ilyich Tchaikovsky", "score": 1.0},
+        )
+        self.assertEqual([item["id"] for item in result].count(5), 1)
+        self.assertIn("LEFT JOIN composer_alias", cursor.execute.call_args.args[0])
+
+    def test_composer_lookup_rejects_empty_input_without_database_query(self):
+        with patch.object(concert_catalog, "get_connection") as get_connection:
+            self.assertEqual(concert_catalog.find_composers(" -- "), [])
+        get_connection.assert_not_called()
 
     def test_no_program_result_must_not_include_program_entries(self):
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
