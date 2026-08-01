@@ -15,7 +15,10 @@ uv run python -m crawlers.sk.filharmonia_sk.main
 uv run python -m analyzers.analyze_potential_events
 ```
 
-Package management uses `uv` (not pip).
+Package management uses `uv` (not pip) for local development. Exception:
+crawler-factory Codex sessions run in an image where the project is installed
+into system Python, so use `python` directly for crawler investigation and
+testing.
 
 ## Architecture
 
