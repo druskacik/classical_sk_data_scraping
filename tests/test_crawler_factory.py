@@ -163,6 +163,22 @@ class RegistryIdentityTests(unittest.TestCase):
 
 
 class FactoryArgumentTests(unittest.TestCase):
+    def test_model_can_be_overridden_per_run(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"CRAWLER_FACTORY_REPOSITORY": "https://example.test/repository.git"},
+                clear=False,
+            ),
+            patch.object(
+                sys,
+                "argv",
+                ["run_crawler_factory", "--model", "gpt-5.6-luna"],
+            ),
+        ):
+            args = factory.parse_args()
+        self.assertEqual(args.model, "gpt-5.6-luna")
+
     def test_repository_defaults_to_environment(self):
         with (
             patch.dict(
@@ -311,6 +327,7 @@ class AttemptTests(unittest.TestCase):
 
             def fake_run_command(command, **kwargs):
                 if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
+                    self.assertEqual(command[command.index("--model") + 1], "gpt-5.6-luna")
                     path = workspace / crawler_directory("https://www.hamu.cz/") / "main.py"
                     path.parent.mkdir(parents=True)
                     path.write_text("# useful partial result\n", encoding="utf-8")
@@ -327,6 +344,7 @@ class AttemptTests(unittest.TestCase):
                     self.SOURCE,
                     30,
                     {},
+                    "gpt-5.6-luna",
                 )
 
         self.assertEqual(result["status"], "generated")

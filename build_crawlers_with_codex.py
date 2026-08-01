@@ -90,6 +90,7 @@ def build_crawler(
     sandbox: Sandbox = Sandbox.full_access,
     country_code: str | None = None,
     crawler_directory: Path | None = None,
+    model: str = MODEL,
 ) -> dict:
     workspace = (workspace or Path.cwd()).resolve()
     country = (country_code or country_code_for_url(url)).upper()
@@ -121,14 +122,14 @@ def build_crawler(
     thread = codex.thread_start(
         approval_mode=ApprovalMode.auto_review,
         cwd=str(workspace),
-        model=MODEL,
+        model=model,
         sandbox=sandbox,
     )
     result = thread.run(
         prompt,
         approval_mode=ApprovalMode.auto_review,
         cwd=str(workspace),
-        model=MODEL,
+        model=model,
         sandbox=sandbox,
     )
 
@@ -147,6 +148,11 @@ def build_crawler(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Use Codex SDK to build crawlers from prompts/build_crawler.mustache."
+    )
+    parser.add_argument(
+        "--model",
+        default=MODEL,
+        help=f"Codex model to use (default: {MODEL}).",
     )
     parser.add_argument(
         "--url",
@@ -245,6 +251,7 @@ def main() -> None:
                     sandbox,
                     args.country_code,
                     args.crawler_directory,
+                    args.model,
                 )
             except Exception as exc:
                 result = {
