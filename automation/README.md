@@ -15,10 +15,12 @@ most five due sources from PostgreSQL, commits generated `main.py` or
 Codex runs with the
 `workspace-write` sandbox inside the disposable clone.
 
-Codex is trusted to investigate, implement, and test each crawler. The worker
-does not repeat the live scrape. It preserves a result confined to the expected
-new crawler directory even when the Codex process exits unsuccessfully or
-reaches its generation timeout.
+Codex investigates and implements each crawler with targeted parser checks. For
+a generated `main.py`, the worker performs one authoritative full scrape before
+committing it. The live validation applies the same transformations and
+deduplication as production without writing a CSV or uploading data. Invalid
+records prevent publication; external availability failures and validation
+timeouts are retained as inconclusive reports and retried later.
 
 The required GitHub check is deliberately limited to deterministic repository
 safety: generated-file scope, protection of existing crawlers, file size,
@@ -98,6 +100,7 @@ Set these in **App Configs > Environmental Variables**:
 | `CRAWLER_FACTORY_UPDATE_INTERVAL_MINUTES` | `5` | idle update-check interval |
 | `CRAWLER_FACTORY_MAX_URLS` | `5` | daily URL limit |
 | `CRAWLER_FACTORY_TIMEOUT_MINUTES` | `60` | per-URL Codex timeout |
+| `CRAWLER_FACTORY_VALIDATION_TIMEOUT_MINUTES` | `15` | per-crawler full-scrape validation timeout |
 | `DB_HOST` | required | PostgreSQL host containing the crawler source registry |
 | `DB_NAME` | required | PostgreSQL database name |
 | `DB_USER` | required | PostgreSQL user |
@@ -222,6 +225,9 @@ docker exec -it <container-id> \
 Use `--source-id ID` to target a due registry row. `--url URL` remains
 available for manual discovery/debugging and idempotently ingests the URL
 before selection; add `--country-code XX` when the country cannot be inferred.
+Use `--validation-timeout-minutes N` to give an unusually slow crawler a larger
+one-off full-scrape budget. A validation timeout never publishes an unverified
+crawler; it retains an inconclusive report and returns the source to retry.
 Inside the deployed container, the repository defaults to
 `CRAWLER_FACTORY_REPOSITORY`. Pass `--repository` only to override it or when
 running outside that configured environment.

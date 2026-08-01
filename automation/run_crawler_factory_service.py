@@ -53,6 +53,7 @@ class ServiceConfig:
     deploy_webhook: str | None
     max_urls: int
     timeout_minutes: int
+    validation_timeout_minutes: int
     state_path: Path
 
     @classmethod
@@ -81,6 +82,10 @@ class ServiceConfig:
             timeout_minutes=positive_integer(
                 os.getenv("CRAWLER_FACTORY_TIMEOUT_MINUTES", "60"),
                 "CRAWLER_FACTORY_TIMEOUT_MINUTES",
+            ),
+            validation_timeout_minutes=positive_integer(
+                os.getenv("CRAWLER_FACTORY_VALIDATION_TIMEOUT_MINUTES", "15"),
+                "CRAWLER_FACTORY_VALIDATION_TIMEOUT_MINUTES",
             ),
             state_path=Path(
                 os.getenv("CRAWLER_FACTORY_SERVICE_STATE_PATH", str(DEFAULT_SERVICE_STATE_PATH))
@@ -153,6 +158,8 @@ class FactoryService:
             str(self.config.max_urls),
             "--timeout-minutes",
             str(self.config.timeout_minutes),
+            "--validation-timeout-minutes",
+            str(self.config.validation_timeout_minutes),
         ]
         log(
             f"Starting daily batch for {now.date().isoformat()} "

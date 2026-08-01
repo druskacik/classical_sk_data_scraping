@@ -179,6 +179,34 @@ class FactoryArgumentTests(unittest.TestCase):
             args = factory.parse_args()
         self.assertEqual(args.model, "gpt-5.6-luna")
 
+    def test_validation_timeout_can_be_overridden_per_run(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {"CRAWLER_FACTORY_REPOSITORY": "https://example.test/repository.git"},
+                clear=False,
+            ),
+            patch.object(
+                sys,
+                "argv",
+                ["run_crawler_factory", "--validation-timeout-minutes", "45"],
+            ),
+        ):
+            args = factory.parse_args()
+        self.assertEqual(args.validation_timeout_minutes, 45)
+
+    def test_prompt_contains_generated_record_quality_contract(self):
+        prompt = (
+            Path(__file__).parents[1] / "prompts/build_crawler.mustache"
+        ).read_text(encoding="utf-8")
+        normalized = " ".join(prompt.split())
+        self.assertIn("Start and end times and descriptions may be None", normalized)
+        self.assertNotIn("country_code, type, description", normalized)
+        self.assertIn("including past concerts", normalized)
+        self.assertIn("must never be empty", normalized)
+        self.assertIn("upload_target='classical'", normalized)
+        self.assertIn("upload_target` to `potential`", normalized)
+
     def test_repository_defaults_to_environment(self):
         with (
             patch.dict(
@@ -332,6 +360,21 @@ class AttemptTests(unittest.TestCase):
                     path.parent.mkdir(parents=True)
                     path.write_text("# useful partial result\n", encoding="utf-8")
                     return subprocess.CompletedProcess(command, 1, "", "builder failed")
+                if "automation.validate_generated_crawler" in command:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        json.dumps(
+                            {
+                                "status": "passed",
+                                "record_count": 2,
+                                "issue_count": 0,
+                                "issues": [],
+                                "duration_seconds": 1.5,
+                            }
+                        ),
+                        "",
+                    )
                 return original_run_command(command, **kwargs)
 
             with (
@@ -350,6 +393,7 @@ class AttemptTests(unittest.TestCase):
         self.assertEqual(result["status"], "generated")
         self.assertEqual(result["commit"], "abc123")
         self.assertEqual(result["generation_warning"], "builder exited with status 1")
+        self.assertEqual(result["validation_status"], "passed")
 
     def test_timed_out_builder_result_is_preserved_when_scope_is_valid(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -367,6 +411,21 @@ class AttemptTests(unittest.TestCase):
                     path.parent.mkdir(parents=True)
                     path.write_text("# useful partial result\n", encoding="utf-8")
                     raise subprocess.TimeoutExpired(command, 60, output="partial log\n")
+                if "automation.validate_generated_crawler" in command:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        json.dumps(
+                            {
+                                "status": "passed",
+                                "record_count": 1,
+                                "issue_count": 0,
+                                "issues": [],
+                                "duration_seconds": 2.0,
+                            }
+                        ),
+                        "",
+                    )
                 return original_run_command(command, **kwargs)
 
             with (
@@ -384,6 +443,87 @@ class AttemptTests(unittest.TestCase):
         self.assertEqual(result["status"], "generated")
         self.assertEqual(result["commit"], "abc123")
         self.assertEqual(result["generation_warning"], "builder exceeded 1 minute")
+
+    def test_failed_live_validation_prevents_commit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            run_dir = root / "runs"
+            workspace.mkdir()
+            run_dir.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+
+            def fake_run_command(command, **kwargs):
+                if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
+                    path = workspace / crawler_directory("https://www.hamu.cz/") / "main.py"
+                    path.parent.mkdir(parents=True)
+                    path.write_text("# generated\n", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[:2] == ["git", "status"]:
+                    path = crawler_directory("https://www.hamu.cz/") / "main.py"
+                    return subprocess.CompletedProcess(command, 0, f"?? {path}\0", "")
+                if "automation.validate_generated_crawler" in command:
+                    return subprocess.CompletedProcess(
+                        command,
+                        1,
+                        json.dumps(
+                            {
+                                "status": "data_quality_failure",
+                                "record_count": 2,
+                                "issue_count": 1,
+                                "issues": [
+                                    {
+                                        "record": 1,
+                                        "field": "venue",
+                                        "reason": "required nonempty venue",
+                                        "value": None,
+                                    }
+                                ],
+                                "duration_seconds": 1.0,
+                            }
+                        ),
+                        "",
+                    )
+                raise AssertionError(command)
+
+            with (
+                patch.object(factory, "run_command", side_effect=fake_run_command),
+                patch.object(factory, "git_commit") as commit,
+            ):
+                result = attempt_source(
+                    workspace,
+                    run_dir,
+                    self.SOURCE,
+                    30,
+                    {},
+                )
+
+        self.assertEqual(result["status"], "generation_failed")
+        self.assertEqual(result["validation_status"], "data_quality_failure")
+        self.assertIn("venue", result["error"])
+        commit.assert_not_called()
+
+    def test_live_validation_timeout_is_inconclusive_and_retained(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run_dir = Path(temporary)
+            with patch.object(
+                factory,
+                "run_command",
+                side_effect=subprocess.TimeoutExpired(["python"], 60),
+            ):
+                report = factory.validate_generated_crawler(
+                    Path(temporary),
+                    run_dir,
+                    self.SOURCE,
+                    crawler_directory("https://www.hamu.cz/"),
+                    {},
+                    1,
+                )
+
+            reports = list(run_dir.glob("*-validation.json"))
+
+        self.assertEqual(report["status"], "inconclusive_runtime")
+        self.assertEqual(len(reports), 1)
 
 
 class PullRequestScopeTests(unittest.TestCase):

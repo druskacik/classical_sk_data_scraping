@@ -25,6 +25,7 @@ class ServiceConfigTests(unittest.TestCase):
         self.assertEqual(config.update_interval_seconds, 300)
         self.assertEqual(config.max_urls, 5)
         self.assertEqual(config.timeout_minutes, 60)
+        self.assertEqual(config.validation_timeout_minutes, 15)
 
     def test_invalid_schedule_is_rejected(self):
         with patch.dict(
@@ -48,6 +49,15 @@ class ServiceConfigTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {"CRAWLER_FACTORY_MAX_URLS": "0"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "at least 1"):
+                service.ServiceConfig.from_environment()
+
+    def test_nonpositive_validation_timeout_is_rejected(self):
+        with patch.dict(
+            os.environ,
+            {"CRAWLER_FACTORY_VALIDATION_TIMEOUT_MINUTES": "0"},
             clear=True,
         ):
             with self.assertRaisesRegex(ValueError, "at least 1"):
@@ -88,6 +98,7 @@ class FactoryServiceTests(unittest.TestCase):
             deploy_webhook=webhook,
             max_urls=7,
             timeout_minutes=45,
+            validation_timeout_minutes=20,
             state_path=root / "service-state.json",
         )
 
@@ -112,6 +123,7 @@ class FactoryServiceTests(unittest.TestCase):
         self.assertIn("https://github.com/example/repository.git", command)
         self.assertEqual(command[command.index("--max-urls") + 1], "7")
         self.assertEqual(command[command.index("--timeout-minutes") + 1], "45")
+        self.assertEqual(command[command.index("--validation-timeout-minutes") + 1], "20")
 
     def test_matching_commit_does_not_request_deployment(self):
         with tempfile.TemporaryDirectory() as temporary:

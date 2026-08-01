@@ -24,6 +24,7 @@ from build_crawlers_with_codex import MODEL, country_code_for_url, crawler_folde
 
 DEFAULT_LOCK_PATH = Path("/var/lib/crawler-factory/factory.lock")
 DEFAULT_RUNS_DIR = Path("/var/lib/crawler-factory/runs")
+DEFAULT_VALIDATION_TIMEOUT_MINUTES = 15
 METADATA_PATTERN = re.compile(
     r"<!-- crawler-factory-metadata\s*(\{.*?\})\s*-->",
     re.DOTALL,
@@ -211,6 +212,86 @@ def git_commit(workspace: Path, source: dict, status: str) -> str:
     return run_command(["git", "rev-parse", "HEAD"], cwd=workspace).stdout.strip()
 
 
+def validate_generated_crawler(
+    workspace: Path,
+    run_dir: Path,
+    source: dict,
+    crawler_path: Path,
+    child_env: dict[str, str],
+    timeout_minutes: int,
+) -> dict:
+    slug = crawler_path.name
+    report_path = run_dir / f"{source['id']}-{slug}-validation.json"
+    command = [
+        sys.executable,
+        "-m",
+        "automation.validate_generated_crawler",
+        "--crawler-directory",
+        str(crawler_path),
+    ]
+    try:
+        completed = run_command(
+            command,
+            cwd=workspace,
+            env=child_env,
+            timeout=timeout_minutes * 60,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        report = {
+            "status": "inconclusive_runtime",
+            "record_count": None,
+            "issue_count": None,
+            "issues": [],
+            "error": f"full scrape exceeded {timeout_minutes} minutes",
+            "duration_seconds": timeout_minutes * 60,
+        }
+    else:
+        try:
+            report = json.loads(completed.stdout)
+        except (json.JSONDecodeError, TypeError):
+            report = {
+                "status": "execution_error",
+                "record_count": None,
+                "issue_count": None,
+                "issues": [],
+                "error": "validator did not return valid JSON",
+                "duration_seconds": None,
+            }
+        if not isinstance(report, dict):
+            report = {
+                "status": "execution_error",
+                "record_count": None,
+                "issue_count": None,
+                "issues": [],
+                "error": "validator JSON must be an object",
+                "duration_seconds": None,
+            }
+        if completed.returncode != 0 and report.get("status") == "passed":
+            report["status"] = "execution_error"
+            report["error"] = "validator exited unsuccessfully after reporting success"
+        if completed.stderr.strip():
+            report["validator_stderr"] = completed.stderr.strip()[:1000]
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return report
+
+
+def validation_error(report: dict) -> str:
+    status = report.get("status", "execution_error")
+    if status == "data_quality_failure":
+        count = report.get("issue_count")
+        examples = report.get("issues") or []
+        detail = "; ".join(
+            f"record {issue.get('record')} {issue.get('field')}: {issue.get('reason')}"
+            for issue in examples[:3]
+        )
+        return f"live validation found {count} data-quality issue(s): {detail}"
+    return f"live validation {status}: {report.get('error') or 'unknown error'}"
+
+
 def attempt_source(
     workspace: Path,
     run_dir: Path,
@@ -218,6 +299,7 @@ def attempt_source(
     timeout_minutes: int,
     child_env: dict[str, str],
     model: str = MODEL,
+    validation_timeout_minutes: int = DEFAULT_VALIDATION_TIMEOUT_MINUTES,
 ) -> dict:
     started = time.monotonic()
     url = source["canonical_url"]
@@ -232,6 +314,9 @@ def attempt_source(
         "status": "generation_failed",
         "commit": None,
         "generation_warning": None,
+        "validation_status": None,
+        "validation_record_count": None,
+        "validation_duration_seconds": None,
         "final_response": None,
         "error": None,
     }
@@ -294,7 +379,7 @@ def attempt_source(
             datetime.now(UTC).date(),
         )
         output_path = workspace / directory
-        result["status"] = "blocked" if (output_path / "BLOCKED.md").exists() else "generated"
+        blocked = (output_path / "BLOCKED.md").exists()
         if builder_report.exists():
             try:
                 builder_data = json.loads(builder_report.read_text(encoding="utf-8"))
@@ -307,6 +392,25 @@ def attempt_source(
                     if result["generation_warning"]
                     else warning
                 )
+        if blocked:
+            result["status"] = "blocked"
+            result["validation_status"] = "not_applicable"
+        else:
+            validation = validate_generated_crawler(
+                workspace,
+                run_dir,
+                source,
+                directory,
+                child_env,
+                validation_timeout_minutes,
+            )
+            result["validation_status"] = validation.get("status")
+            result["validation_record_count"] = validation.get("record_count")
+            result["validation_duration_seconds"] = validation.get("duration_seconds")
+            if validation.get("status") != "passed":
+                result["error"] = validation_error(validation)
+                return result
+            result["status"] = "generated"
         result["commit"] = git_commit(workspace, source, result["status"])
         return result
     except Exception as exc:
@@ -367,10 +471,19 @@ def reconcile_pull_requests(registry: CrawlerRegistry, workspace: Path) -> dict[
 
 
 def pr_body(results: list[dict], model: str, run_id: str) -> str:
-    rows = ["| Source | URL | Result | Warning | Directory |", "|---|---|---|---|---|"]
+    rows = [
+        "| Source | URL | Result | Validation | Warning | Directory |",
+        "|---|---|---|---|---|---|",
+    ]
     for result in results:
+        validation = result.get("validation_status") or "not run"
+        if validation == "passed":
+            validation = (
+                f"passed ({result.get('validation_record_count')} records, "
+                f"{result.get('validation_duration_seconds')}s)"
+            )
         rows.append(
-            f"| {result['source_id']} | {result['url']} | {result['status']} | "
+            f"| {result['source_id']} | {result['url']} | {result['status']} | {validation} | "
             f"{result.get('generation_warning') or 'none'} | "
             f"`{result['crawler_directory']}` |"
         )
@@ -418,6 +531,17 @@ def parse_args() -> argparse.Namespace:
         help=f"Codex model for this batch (default: {MODEL}).",
     )
     parser.add_argument("--timeout-minutes", type=int, default=60)
+    parser.add_argument(
+        "--validation-timeout-minutes",
+        type=int,
+        default=int(
+            os.getenv(
+                "CRAWLER_FACTORY_VALIDATION_TIMEOUT_MINUTES",
+                str(DEFAULT_VALIDATION_TIMEOUT_MINUTES),
+            )
+        ),
+        help="Maximum minutes for the authoritative full scrape (default: 15).",
+    )
     parser.add_argument("--lock-path", type=Path, default=DEFAULT_LOCK_PATH)
     parser.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS_DIR)
     parser.add_argument("--url", action="append", dest="urls")
@@ -436,6 +560,8 @@ def parse_args() -> argparse.Namespace:
 def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
     if args.max_urls < 1:
         raise SystemExit("--max-urls must be at least 1")
+    if args.validation_timeout_minutes < 1:
+        raise SystemExit("--validation-timeout-minutes must be at least 1")
     if args.urls and args.source_ids:
         raise SystemExit("--url and --source-id are mutually exclusive")
     run_id = f"{datetime.now(UTC):%Y%m%d}-{uuid.uuid4().hex[:8]}"
@@ -533,6 +659,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
                 args.timeout_minutes,
                 child_env,
                 args.model,
+                args.validation_timeout_minutes,
             )
             result["resolved_url"] = resolved_url
             results.append(result)

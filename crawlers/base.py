@@ -49,11 +49,8 @@ class BaseCrawler:
             return upload_potential_concerts(records)
         return upload_concerts(records)
 
-    def run(self):
-        print(f'Getting concerts for {self.config.slug.replace("_", ".")} ...')
-        records = self.scrape()
-        print(f'Found {len(records)} concerts')
-
+    def prepare_records(self, records: list[dict]) -> list[dict]:
+        """Apply production transformations without writing or uploading."""
         df = self.build_dataframe(records)
         df = self.transform(df)
 
@@ -63,16 +60,27 @@ class BaseCrawler:
         if 'country_code' not in df.columns:
             df.insert(0, 'country_code', self.config.country_code)
         else:
-            df['country_code'] = df['country_code'].apply(lambda value: value.upper() if isinstance(value, str) else value)
+            df['country_code'] = df['country_code'].apply(
+                lambda value: value.upper() if isinstance(value, str) else value
+            )
 
         if self.config.dedupe_subset:
             df.drop_duplicates(subset=self.config.dedupe_subset, inplace=True)
+
+        return df.to_dict(orient='records')
+
+    def run(self):
+        print(f'Getting concerts for {self.config.slug.replace("_", ".")} ...')
+        records = self.scrape()
+        print(f'Found {len(records)} concerts')
+
+        records = self.prepare_records(records)
+        df = pd.DataFrame(records)
 
         save_path = self.config.save_path
         df.to_csv(save_path, index=False)
         print(f'Saved to {save_path}')
 
-        records = df.to_dict(orient='records')
         print(f'Prepared {len(records)} concerts for upload')
 
         print('Uploading concerts to the API ...')

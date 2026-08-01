@@ -1,8 +1,9 @@
-Your role is to create a crawler for a classical music concerts website.
+Your role is to create a crawler for a website that may publish classical music concerts.
 
 What should the crawler do:
 
-- locate all concerts on the website
+- locate all scrapeable concerts on the website, including past concerts when
+  the site still publishes them
 - create a universal script that scrapes the concert details
 
 For inspiration, see examples in @crawlers folder.
@@ -12,14 +13,34 @@ To investigate the website, use the Playwright MCP. First, investigate if you ca
 Concert details should contain following values:
 title, date, url, time_from, venue, city, country_code, description, source_url, source
 
-If some of the columns can't be extracted in a structured way, use None or a reasonable default (e.g. city can be often inferred from the website).
+The title, date, URL, venue, city, country code, source URL, and source must never
+be empty. Dates must be real calendar dates in YYYY-MM-DD form. Start and end
+times and descriptions may be None when the website does not provide them.
+
+Use a reasonable city or venue default when the source provides strong evidence
+for one. For example, an institution that publishes events only in its home city
+can use that city as a default, and a venue-specific calendar can use that venue.
+Do not apply a philharmonic's home city or hall to an event explicitly shown as a
+touring performance. Never put prices, ticket text, performers, addresses, or
+descriptive prose into city or venue. Never use the city itself as a placeholder
+venue. If an individual event's date, city, or venue cannot be extracted or
+defensibly inferred, skip that event instead of returning an invalid record.
+
+Decide whether the source is classical-only or broad. A classical-only source
+may use the default `upload_target='classical'`. A mixed theatre, festival,
+ticketing, or general cultural source must set `CrawlerConfig.upload_target` to
+`potential` so Gemini classifies the events before they reach classical_concert.
+Do not upload every event from a mixed source directly as classical music.
 
 What I mean by description: description is a long body of text related to the concert. It can be large and unstructured, and it's important that it includes details about which composers and works are being played (if this is on the website, of course). The reasoning behind this is that the description will be later parsed by AI to extract composers and works.
 
 Save the new crawler at exactly `{{ crawler_directory }}/main.py`. Do not derive
 a different directory from redirects or alternate domains. Set
 `CrawlerConfig.country_code` to `{{ country_code }}`. After building, test it
-by running it and look at the output.
+with targeted parser checks and inspect representative output records, including
+their date/city/venue pairs and duplicates. Use system `python`, not `uv`, in the
+crawler-factory image. The outer worker performs the authoritative full scrape,
+so you do not need to repeat a slow full-catalogue run solely for final validation.
 
 Only modify the expected new crawler directory. Do not modify shared crawler
 code, dependencies, workflows, prompts, configuration, environment files, or
@@ -47,8 +68,8 @@ HTML options, create `{{ crawler_directory }}/BLOCKED.md` but do not create
 - which API, network, and HTML approaches were attempted
 - what would unblock implementation
 
-Also use `BLOCKED.md` when the source currently exposes no concerts, even if
-this appears seasonal. Start `BLOCKED.md` with exactly this metadata block,
+Also use `BLOCKED.md` when the source exposes no scrapeable concerts, including
+in its available archives. Start `BLOCKED.md` with exactly this metadata block,
 using one of `no_current_events`, `access_blocked`, `no_parseable_source`, or
 `implementation_failed` as the reason code. The outer worker will normalize
 the URL, country, attempt date, and retry date before publication:
