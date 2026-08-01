@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from agent_utils.concert_catalog import normalize
+from crawlers.cities import normalize_city_key
 
 
 load_dotenv()
@@ -33,8 +34,6 @@ EVENT_UPDATE_FIELDS = (
     "date",
     "time_from",
     "time_to",
-    "city",
-    "country_code",
     "venue",
 )
 EVENT_STATUSES = ("scheduled", "cancelled", "postponed", "rescheduled")
@@ -126,6 +125,23 @@ OUTPUT_SCHEMA: dict[str, Any] = {
                 "required": ["field", "new_value", "source_url", "evidence"],
             },
         },
+        "location_resolution": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "status": {"type": "string", "enum": ["not_needed", "existing_city", "new_city", "country_only", "ambiguous", "invalid", "insufficient_evidence"]},
+                "existing_city_id": {"type": ["integer", "null"]},
+                "english_name": {"type": ["string", "null"]},
+                "local_name": {"type": ["string", "null"]},
+                "country_code": {"type": ["string", "null"]},
+                "external_source": {"type": ["string", "null"]},
+                "external_id": {"type": ["string", "null"]},
+                "raw_value_type": {"type": ["string", "null"], "enum": ["legitimate_name", "postal_or_address", "extraction_artifact", "ambiguous", "invalid", None]},
+                "source_url": {"type": "string"},
+                "evidence": {"type": "string"},
+            },
+            "required": ["status", "existing_city_id", "english_name", "local_name", "country_code", "external_source", "external_id", "raw_value_type", "source_url", "evidence"],
+        },
     },
     "required": [
         "status",
@@ -135,6 +151,7 @@ OUTPUT_SCHEMA: dict[str, Any] = {
         "program",
         "unresolved_program",
         "event_updates",
+        "location_resolution",
     ],
 }
 
@@ -148,10 +165,15 @@ class Concert:
     description: str | None
     time_from: time | None = None
     time_to: time | None = None
-    city: str | None = None
-    country_code: str | None = None
+    city_raw: str | None = None
+    country_code_raw: str | None = None
     venue: str | None = None
     event_status: str = "scheduled"
+    source: str | None = None
+    city_id: int | None = None
+    city_english_name: str | None = None
+    city_local_name: str | None = None
+    country_code_resolved: str | None = None
 
 
 def get_connection():
@@ -184,38 +206,54 @@ def render_prompt(concert: Concert) -> str:
                 if concert.time_to
                 else "(not available)"
             ),
-            "city": concert.city or "(not available)",
-            "country_code": concert.country_code or "(not available)",
+            "city_raw": concert.city_raw or "(not available)",
+            "country_code_raw": concert.country_code_raw or "(not available)",
+            "city_id": concert.city_id or "(unresolved)",
+            "city_english_name": concert.city_english_name or "(unresolved)",
+            "city_local_name": concert.city_local_name or "(unresolved)",
+            "country_code_resolved": concert.country_code_resolved or "(unresolved)",
             "venue": concert.venue or "(not available)",
             "event_status": concert.event_status,
         },
     )
 
 
-def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool) -> list[Concert]:
+def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool, unresolved_locations: bool = False) -> list[Concert]:
+    columns = """c.id, c.title, c.date, c.url, c.description,
+                 c.time_from, c.time_to, c.city_raw, c.country_code_raw, c.venue,
+                 c.event_status, c.source, c.city_id, city.english_name,
+                 city.local_name, c.country_code_resolved"""
     with conn.cursor() as cursor:
         if concert_ids:
             cursor.execute(
                 """
-                SELECT c.id, c.title, c.date, c.url, c.description,
-                       c.time_from, c.time_to, c.city, c.country_code, c.venue,
-                       c.event_status
+                SELECT {columns}
                 FROM classical_concert c
+                LEFT JOIN city ON city.id = c.city_id
                 LEFT JOIN concert_program_analysis a ON a.classical_concert_id = c.id
                 WHERE c.id = ANY(%s)
                   AND (%s OR a.status IS NULL OR a.status NOT IN ('complete', 'partial', 'composer_only', 'ambiguous', 'expired_no_program', 'failed'))
                 ORDER BY c.id
                 LIMIT %s
-                """,
+                """.format(columns=columns),
                 (concert_ids, force, limit),
+            )
+        elif unresolved_locations:
+            cursor.execute(
+                f"""SELECT {columns}
+                    FROM classical_concert c
+                    LEFT JOIN city ON city.id = c.city_id
+                    WHERE c.city_id IS NULL AND c.city_raw IS NOT NULL
+                      AND c.date >= CURRENT_DATE
+                    ORDER BY c.date, c.id LIMIT %s""",
+                (limit,),
             )
         else:
             cursor.execute(
                 """
-                SELECT c.id, c.title, c.date, c.url, c.description,
-                       c.time_from, c.time_to, c.city, c.country_code, c.venue,
-                       c.event_status
+                SELECT {columns}
                 FROM classical_concert c
+                LEFT JOIN city ON city.id = c.city_id
                 LEFT JOIN concert_program_analysis a ON a.classical_concert_id = c.id
                 WHERE c.program_analysis_eligible = true
                   AND c.date >= CURRENT_DATE
@@ -230,7 +268,7 @@ def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool
                   )
                 ORDER BY c.date, c.id
                 LIMIT %s
-                """,
+                """.format(columns=columns),
                 (
                     MAX_AUTOMATIC_ATTEMPTS,
                     NO_PROGRAM_RETRY_INTERVAL_DAYS,
@@ -374,8 +412,6 @@ def validate_event_updates(
         "date": concert.date,
         "time_from": concert.time_from,
         "time_to": concert.time_to,
-        "city": concert.city,
-        "country_code": concert.country_code,
         "venue": concert.venue,
     }
     for update in updates:
@@ -400,16 +436,13 @@ def validate_event_updates(
                 if not re.fullmatch(r"\d{2}:\d{2}", raw_value):
                     raise ValueError("times must use HH:MM")
                 db_value = time.fromisoformat(raw_value)
-            elif field == "country_code":
-                if not re.fullmatch(r"[A-Z]{2}", raw_value):
-                    raise ValueError("country_code must be an uppercase ISO alpha-2 code")
-                db_value = raw_value
-            elif field in {"city", "venue"}:
+            elif field == "venue":
                 db_value = raw_value
             else:
                 raise ValueError(f"unsupported event field {field!r}")
 
-            if db_value == current_values[field]:
+            comparison_value = current_values[field]
+            if db_value == comparison_value:
                 raise ValueError("proposed value is unchanged")
             if field == "date":
                 with conn.cursor() as cursor:
@@ -438,6 +471,65 @@ def validate_event_updates(
         except (KeyError, TypeError, ValueError) as error:
             print(f"Ignoring invalid event update for concert {concert.id}: {error}")
     return accepted
+
+
+def validate_location_resolution(
+    conn,
+    concert: Concert,
+    proposal: dict[str, Any],
+    *,
+    page_available: bool = True,
+) -> dict[str, Any] | None:
+    try:
+        status = proposal["status"]
+        if status in {"not_needed", "ambiguous", "invalid", "insufficient_evidence"}:
+            return None
+        if not page_available:
+            raise ValueError("an unavailable page cannot resolve a location")
+        source_url = proposal["source_url"].strip()
+        evidence = proposal["evidence"].strip()
+        country = (proposal.get("country_code") or "").strip()
+        if not source_url.startswith(("http://", "https://")) or not evidence:
+            raise ValueError("location evidence and an HTTP source URL are required")
+        if not re.fullmatch(r"[A-Z]{2}", country):
+            raise ValueError("location country must be uppercase ISO alpha-2")
+        if status == "country_only":
+            if concert.city_id is not None:
+                raise ValueError("country-only resolution cannot override a resolved city")
+            return {"status": status, "country_code": country, "source_url": source_url, "evidence": evidence}
+        raw_type = proposal.get("raw_value_type")
+        if raw_type not in {"legitimate_name", "postal_or_address", "extraction_artifact"}:
+            raise ValueError("resolved locations require a resolvable raw value type")
+        if status == "existing_city":
+            city_id = proposal.get("existing_city_id")
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT english_name, local_name, country_code FROM city WHERE id = %s", (city_id,))
+                row = cursor.fetchone()
+            if row is None:
+                raise ValueError("unknown existing city ID")
+            if row[2] != country:
+                raise ValueError("city and country conflict")
+            return {"status": status, "city_id": city_id, "country_code": country, "raw_value_type": raw_type, "source_url": source_url, "evidence": evidence}
+        if status != "new_city":
+            raise ValueError("unsupported location status")
+        required = ("english_name", "local_name", "external_source", "external_id")
+        values = {field: (proposal.get(field) or "").strip() for field in required}
+        if not all(values.values()):
+            raise ValueError("new cities require names and a stable external identity")
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, country_code FROM city WHERE external_source = %s AND external_id = %s",
+                (values["external_source"], values["external_id"]),
+            )
+            existing = cursor.fetchone()
+        if existing:
+            if existing[1] != country:
+                raise ValueError("external city identity conflicts with its stored country")
+            return {"status": "existing_city", "city_id": existing[0], "country_code": country, "raw_value_type": raw_type, "source_url": source_url, "evidence": evidence}
+        return {"status": status, "country_code": country, "raw_value_type": raw_type, "source_url": source_url, "evidence": evidence, **values}
+    except (KeyError, TypeError, ValueError) as error:
+        print(f"Ignoring invalid location resolution for concert {concert.id}: {error}")
+        return None
 
 
 def _json_event_value(value: Any) -> str | None:
@@ -596,12 +688,87 @@ def apply_event_updates(
         )
 
 
+def apply_location_resolution(cursor, concert: Concert, resolution: dict[str, Any], model: str) -> None:
+    status = resolution["status"]
+    if status == "country_only":
+        city_id = concert.city_id
+        country = resolution["country_code"]
+    elif status == "existing_city":
+        city_id = resolution["city_id"]
+        country = resolution["country_code"]
+    else:
+        cursor.execute(
+            """
+            INSERT INTO city
+                (english_name, local_name, country_code, external_source, external_id,
+                 source_url, created_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (external_source, external_id) DO UPDATE SET
+                external_id = EXCLUDED.external_id
+            RETURNING id, country_code
+            """,
+            (resolution["english_name"], resolution["local_name"], resolution["country_code"],
+             resolution["external_source"], resolution["external_id"],
+             resolution["source_url"], model),
+        )
+        city_id, stored_country = cursor.fetchone()
+        if stored_country != resolution["country_code"]:
+            raise ValueError("external city identity conflicts with its stored country")
+        country = stored_country
+
+    if city_id is not None and concert.city_raw:
+        alias_kind = (
+            "legitimate_name"
+            if resolution["raw_value_type"] == "legitimate_name"
+            else "extraction_artifact"
+        )
+        source_scope = None if alias_kind == "legitimate_name" else concert.source
+        cursor.execute(
+            """
+            INSERT INTO city_alias
+                (city_id, alias, normalized_alias, alias_kind, source_scope,
+                 source_url, created_by)
+            SELECT %s, %s, %s, %s, %s, %s, %s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM city_alias
+                WHERE city_id = %s AND normalized_alias = %s
+                  AND source_scope IS NOT DISTINCT FROM %s
+            )
+            """,
+            (city_id, concert.city_raw, normalize_city_key(concert.city_raw), alias_kind,
+             source_scope, resolution["source_url"], model,
+             city_id, normalize_city_key(concert.city_raw), source_scope),
+        )
+
+    changes = []
+    if city_id != concert.city_id:
+        changes.append(("city_id", concert.city_id, city_id))
+    if country != concert.country_code_resolved:
+        changes.append(("country_code_resolved", concert.country_code_resolved, country))
+    cursor.execute(
+        """UPDATE classical_concert
+           SET city_id = %s, country_code_resolved = %s, updated_at = now()
+           WHERE id = %s""",
+        (city_id, country, concert.id),
+    )
+    for field, old, new in changes:
+        cursor.execute(
+            """INSERT INTO classical_concert_change
+                (classical_concert_id, field_name, old_value, new_value,
+                 source_url, evidence, model)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (concert.id, field, Json(old), Json(new), resolution["source_url"],
+             resolution["evidence"], model),
+        )
+
+
 def persist_result(
     conn,
     concert: Concert,
     result: dict[str, Any],
     model: str,
     event_updates: list[dict[str, Any]] | None = None,
+    location_resolution: dict[str, Any] | None = None,
 ) -> None:
     status = result["status"]
     completed = status in {"complete", "composer_only", "expired_no_program", "failed"}
@@ -615,6 +782,8 @@ def persist_result(
                     (concert.id,),
                 )
             apply_event_updates(cursor, concert, event_updates, model)
+            if location_resolution:
+                apply_location_resolution(cursor, concert, location_resolution, model)
             cursor.execute(
                 "SELECT status FROM concert_program_analysis WHERE classical_concert_id = %s",
                 (concert.id,),
@@ -737,6 +906,7 @@ def run(
     model: str = DEFAULT_MODEL,
     commit: bool = False,
     force: bool = False,
+    unresolved_locations: bool = False,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> int:
     conn = get_connection()
@@ -748,7 +918,7 @@ def run(
             if not locked:
                 raise RuntimeError("Another committed concert programme analysis is already running")
             expire_old_no_program(conn)
-        concerts = select_concerts(conn, concert_ids, limit, force)
+        concerts = select_concerts(conn, concert_ids, limit, force, unresolved_locations)
         if not concerts:
             print("No concerts eligible for programme analysis.")
             return 0
@@ -766,9 +936,17 @@ def run(
                         concert,
                         result["event_updates"],
                     )
+                    location_resolution = validate_location_resolution(
+                        conn,
+                        concert,
+                        result.get("location_resolution", {"status": "not_needed"}),
+                        page_available=result["status"] != "page_unavailable",
+                    )
                     print(json.dumps({"concert_id": concert.id, **result}, ensure_ascii=False, indent=2))
                     if commit:
-                        persist_result(conn, concert, result, model, event_updates)
+                        persist_result(
+                            conn, concert, result, model, event_updates, location_resolution
+                        )
                     else:
                         print("DRY RUN: no database changes made")
                 except Exception as error:
@@ -797,6 +975,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--commit", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--unresolved-locations",
+        action="store_true",
+        help="Re-run upcoming concerts whose raw city has no resolved city ID.",
+    )
     return parser.parse_args()
 
 
@@ -808,6 +991,7 @@ def main() -> None:
         model=args.model,
         commit=args.commit,
         force=args.force,
+        unresolved_locations=args.unresolved_locations,
         timeout_seconds=args.timeout_seconds,
     )
     if failures:

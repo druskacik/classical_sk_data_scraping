@@ -394,6 +394,12 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             "program": [],
             "unresolved_program": [],
             "event_updates": [],
+            "location_resolution": {
+                "status": "not_needed", "existing_city_id": None,
+                "english_name": None, "local_name": None, "country_code": None,
+                "external_source": None, "external_id": None, "raw_value_type": None,
+                "source_url": "", "evidence": "",
+            },
         }
         codex_class.return_value.__enter__.return_value = MagicMock()
         with patch("sys.stdout", new_callable=io.StringIO):
@@ -411,6 +417,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertIn("composers", analyzer.OUTPUT_SCHEMA["required"])
         self.assertIn("unresolved_program", analyzer.OUTPUT_SCHEMA["required"])
         self.assertIn("event_updates", analyzer.OUTPUT_SCHEMA["required"])
+        self.assertIn("location_resolution", analyzer.OUTPUT_SCHEMA["required"])
         item = analyzer.OUTPUT_SCHEMA["properties"]["program"]["items"]
         self.assertEqual(
             item["required"],
@@ -427,7 +434,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             ["field", "new_value", "source_url", "evidence"],
         )
 
-    def test_validates_supported_event_updates_and_rejects_unchanged_values(self):
+    def test_validates_supported_event_updates_and_rejects_location_fields(self):
         conn = MagicMock()
         concert = analyzer.Concert(
             1,
@@ -462,6 +469,66 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertEqual(len(accepted), 1)
         self.assertEqual(accepted[0]["field"], "time_from")
         self.assertEqual(accepted[0]["db_value"], time(20, 0))
+
+    def test_validates_existing_city_and_rejects_country_conflict(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchone.return_value = ("Prague", "Praha", "CZ")
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        proposal = {
+            "status": "existing_city", "existing_city_id": 7,
+            "english_name": None, "local_name": None, "country_code": "CZ",
+            "external_source": None, "external_id": None,
+            "raw_value_type": "legitimate_name",
+            "source_url": "https://example.test", "evidence": "The page says Praha.",
+        }
+        accepted = analyzer.validate_location_resolution(conn, concert, proposal)
+        self.assertEqual(accepted["city_id"], 7)
+        proposal["country_code"] = "SK"
+        self.assertIsNone(analyzer.validate_location_resolution(conn, concert, proposal))
+
+    def test_new_city_requires_stable_external_identity(self):
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        proposal = {
+            "status": "new_city", "existing_city_id": None,
+            "english_name": "Hukvaldy", "local_name": "Hukvaldy", "country_code": "CZ",
+            "external_source": "geonames", "external_id": None,
+            "raw_value_type": "extraction_artifact",
+            "source_url": "https://example.test", "evidence": "The venue is in Hukvaldy.",
+        }
+        self.assertIsNone(analyzer.validate_location_resolution(MagicMock(), concert, proposal))
+
+    def test_page_unavailable_cannot_resolve_location(self):
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        proposal = {
+            "status": "country_only", "country_code": "CZ",
+            "source_url": "https://example.test", "evidence": "Stored fallback.",
+        }
+        self.assertIsNone(
+            analyzer.validate_location_resolution(
+                MagicMock(), concert, proposal, page_available=False
+            )
+        )
+
+    def test_persists_existing_city_alias_and_audit(self):
+        cursor = MagicMock()
+        concert = analyzer.Concert(
+            1, "Test", date.today(), "https://example.test", None,
+            city_raw="Praha", country_code_raw="SK", source="Test source",
+        )
+        resolution = {
+            "status": "existing_city", "city_id": 7, "country_code": "CZ",
+            "raw_value_type": "legitimate_name", "source_url": concert.url,
+            "evidence": "The page identifies Prague.",
+        }
+        analyzer.apply_location_resolution(cursor, concert, resolution, "test-model")
+        queries = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertTrue(any("INSERT INTO city_alias" in query for query in queries))
+        self.assertTrue(any("country_code_resolved" in query for query in queries))
+        self.assertEqual(
+            sum("INSERT INTO classical_concert_change" in query for query in queries),
+            2,
+        )
 
     def test_rejects_date_update_that_would_duplicate_a_concert(self):
         conn = MagicMock()

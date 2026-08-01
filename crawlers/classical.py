@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 import psycopg2
+from .cities import clean_city_raw, resolve_city
+
 load_dotenv()
 
 def upload_concerts(data: list[dict], table_name: str = 'classical_concert'):
@@ -36,9 +38,11 @@ def upload_concerts(data: list[dict], table_name: str = 'classical_concert'):
         for concert in new_concerts:
             composers = concert.get('composers')
             is_concert_details_filled = True if composers is not None else False
+            city_raw = clean_city_raw(concert.get('city'))
+            city = resolve_city(cursor, city_raw, concert.get('source'))
             cursor.execute(
-                f"INSERT INTO {table_name} (title, date, source, source_url, time_from, time_to, city, country_code, venue, url, type, description, composers, is_concert_details_filled) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                f"INSERT INTO {table_name} (title, date, source, source_url, time_from, time_to, city_raw, country_code_raw, city_id, country_code_resolved, venue, url, type, description, composers, is_concert_details_filled) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     concert['title'], 
                     concert['date'], 
@@ -46,8 +50,10 @@ def upload_concerts(data: list[dict], table_name: str = 'classical_concert'):
                     concert['source_url'],
                     concert.get('time_from'),
                     concert.get('time_to'), 
-                    concert['city'], 
+                    city_raw,
                     concert.get('country_code'),
+                    city.city_id if city else None,
+                    city.country_code if city else None,
                     concert['venue'],
                     concert['url'], 
                     concert.get('type'),

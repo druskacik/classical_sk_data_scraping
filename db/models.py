@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     Index,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base
@@ -31,6 +32,24 @@ class ClassicalConcert(Base):
             "event_status IN ('scheduled', 'cancelled', 'postponed', 'rescheduled')",
             name="ck_classical_concert_event_status",
         ),
+        CheckConstraint(
+            "country_code_resolved IS NULL OR country_code_resolved ~ '^[A-Z]{2}$'",
+            name="ck_classical_concert_country_code_resolved",
+        ),
+        Index("ix_classical_concert_date_time_id", "date", "time_from", "id"),
+        Index(
+            "ix_classical_concert_country_date_time_id",
+            "country_code_resolved",
+            "date",
+            "time_from",
+            "id",
+        ),
+        Index(
+            "ix_classical_concert_location_date",
+            "country_code_resolved",
+            "city_id",
+            "date",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -41,8 +60,10 @@ class ClassicalConcert(Base):
     source_url = Column(String)
     time_from = Column(Time)
     time_to = Column(Time)
-    city = Column(String)
-    country_code = Column(String(2))
+    city_raw = Column(String)
+    country_code_raw = Column(String(2))
+    city_id = Column(BigInteger, ForeignKey("city.id", ondelete="SET NULL"))
+    country_code_resolved = Column(String(2))
     venue = Column(String)
     type = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -58,6 +79,13 @@ class ClassicalConcert(Base):
 
 class PotentialEvent(Base):
     __tablename__ = "potential_event"
+    __table_args__ = (
+        CheckConstraint(
+            "country_code_resolved IS NULL OR country_code_resolved ~ '^[A-Z]{2}$'",
+            name="ck_potential_event_country_code_resolved",
+        ),
+        Index("ix_potential_event_city_id", "city_id"),
+    )
 
     id = Column(Integer, primary_key=True)
     title = Column(String, nullable=False)
@@ -67,8 +95,10 @@ class PotentialEvent(Base):
     source_url = Column(String)
     time_from = Column(Time)
     time_to = Column(Time)
-    city = Column(String)
-    country_code = Column(String(2))
+    city_raw = Column(String)
+    country_code_raw = Column(String(2))
+    city_id = Column(BigInteger, ForeignKey("city.id", ondelete="SET NULL"))
+    country_code_resolved = Column(String(2))
     venue = Column(String)
     type = Column(String)
     analyzed = Column(Boolean, server_default="false")
@@ -79,6 +109,62 @@ class PotentialEvent(Base):
     description = Column(Text)
     is_concert_details_filled = Column(Boolean, server_default="false")
     composers = Column(ARRAY(Text))
+
+
+class City(Base):
+    __tablename__ = "city"
+    __table_args__ = (
+        UniqueConstraint("external_source", "external_id", name="uq_city_external_identity"),
+        CheckConstraint("country_code ~ '^[A-Z]{2}$'", name="ck_city_country_code"),
+        Index("ix_city_country_english_name", "country_code", "english_name"),
+    )
+
+    id = Column(BigInteger, primary_key=True)
+    english_name = Column(Text, nullable=False)
+    local_name = Column(Text, nullable=False)
+    country_code = Column(String(2), nullable=False)
+    external_source = Column(String, nullable=False)
+    external_id = Column(String, nullable=False)
+    source_url = Column(Text, nullable=False)
+    created_by = Column(String, nullable=False, server_default="seed")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CityAlias(Base):
+    __tablename__ = "city_alias"
+    __table_args__ = (
+        CheckConstraint(
+            "alias_kind IN ('legitimate_name', 'extraction_artifact')",
+            name="ck_city_alias_kind",
+        ),
+        Index("ix_city_alias_lookup", "normalized_alias"),
+        Index(
+            "uq_city_alias_global",
+            "city_id",
+            "normalized_alias",
+            unique=True,
+            postgresql_where=text("source_scope IS NULL"),
+        ),
+        Index(
+            "uq_city_alias_scoped",
+            "city_id",
+            "normalized_alias",
+            "source_scope",
+            unique=True,
+            postgresql_where=text("source_scope IS NOT NULL"),
+        ),
+    )
+
+    id = Column(BigInteger, primary_key=True)
+    city_id = Column(BigInteger, ForeignKey("city.id", ondelete="CASCADE"), nullable=False)
+    alias = Column(Text, nullable=False)
+    normalized_alias = Column(Text, nullable=False)
+    language_code = Column(String)
+    alias_kind = Column(String, nullable=False)
+    source_scope = Column(String)
+    source_url = Column(Text, nullable=False)
+    created_by = Column(String, nullable=False, server_default="seed")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class Composer(Base):
@@ -97,6 +183,11 @@ class ClassicalConcertComposer(Base):
             "classical_concert_id",
             "composer_id",
             name="uq_classical_concert_composer_link",
+        ),
+        Index(
+            "ix_classical_concert_composer_composer_concert",
+            "composer_id",
+            "classical_concert_id",
         ),
     )
 
@@ -125,6 +216,11 @@ class ClassicalConcertWork(Base):
             "classical_concert_id",
             "work_id",
             name="uq_classical_concert_work_link",
+        ),
+        Index(
+            "ix_classical_concert_work_work_concert",
+            "work_id",
+            "classical_concert_id",
         ),
     )
 
@@ -161,7 +257,7 @@ class ClassicalConcertChange(Base):
     __table_args__ = (
         CheckConstraint(
             "field_name IN ('event_status', 'date', 'time_from', 'time_to', "
-            "'city', 'country_code', 'venue')",
+            "'city', 'country_code', 'city_id', 'country_code_resolved', 'venue')",
             name="ck_classical_concert_change_field",
         ),
         Index(

@@ -53,7 +53,8 @@ def upload_classical_concerts(conn):
     
     cursor.execute("""
         SELECT
-            id, title, date, url, source, source_url, time_from, time_to, city, country_code, venue, type, description
+            id, title, date, url, source, source_url, time_from, time_to,
+            city_raw, country_code_raw, city_id, country_code_resolved, venue, type, description
         FROM potential_event
         WHERE is_classical_concert = true AND added = false;
     """)
@@ -70,9 +71,12 @@ def upload_classical_concerts(conn):
         
         if not exists:
             cursor.execute("""
-            INSERT INTO classical_concert (title, date, url, source, source_url, time_from, time_to, city, country_code, venue, type, description)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (concert[1], concert[2], concert[3], concert[4], concert[5], concert[6], concert[7], concert[8], concert[9], concert[10], concert[11], concert[12]))
+            INSERT INTO classical_concert
+                (title, date, url, source, source_url, time_from, time_to,
+                 city_raw, country_code_raw, city_id, country_code_resolved,
+                 venue, type, description)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, concert[1:])
         else:
             skipped_count += 1
             
