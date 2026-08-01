@@ -217,6 +217,7 @@ def attempt_source(
     source: dict,
     timeout_minutes: int,
     child_env: dict[str, str],
+    model: str = MODEL,
 ) -> dict:
     started = time.monotonic()
     url = source["canonical_url"]
@@ -239,6 +240,8 @@ def attempt_source(
         str(workspace / "build_crawlers_with_codex.py"),
         "--workspace",
         str(workspace),
+        "--model",
+        model,
         "--url",
         url,
         "--country-code",
@@ -409,6 +412,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--base-branch", default="master")
     parser.add_argument("--max-urls", type=int, default=5)
+    parser.add_argument(
+        "--model",
+        default=MODEL,
+        help=f"Codex model for this batch (default: {MODEL}).",
+    )
     parser.add_argument("--timeout-minutes", type=int, default=60)
     parser.add_argument("--lock-path", type=Path, default=DEFAULT_LOCK_PATH)
     parser.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS_DIR)
@@ -475,7 +483,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
         registry.reconcile_workspace(workspace)
         reconcile_pull_requests(registry, workspace)
         registry.reconcile_run_statuses()
-        registry.create_run(run_id, worker_id, branch, MODEL)
+        registry.create_run(run_id, worker_id, branch, args.model)
         run_created = True
         child_env = sanitized_child_env(run_dir)
         for _ in range(args.max_urls):
@@ -524,6 +532,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
                 source,
                 args.timeout_minutes,
                 child_env,
+                args.model,
             )
             result["resolved_url"] = resolved_url
             results.append(result)
@@ -556,7 +565,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
 
         run_command(["git", "push", "--set-upstream", "origin", branch], cwd=workspace)
         body_path = run_dir / "pull-request.md"
-        body_path.write_text(pr_body(results, MODEL, run_id), encoding="utf-8")
+        body_path.write_text(pr_body(results, args.model, run_id), encoding="utf-8")
         pr_url = run_command(
             [
                 "gh",
