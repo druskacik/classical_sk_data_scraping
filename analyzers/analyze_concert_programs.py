@@ -716,7 +716,8 @@ def apply_location_resolution(cursor, concert: Concert, resolution: dict[str, An
             raise ValueError("external city identity conflicts with its stored country")
         country = stored_country
 
-    if city_id is not None and concert.city_raw:
+    normalized_alias = normalize_city_key(concert.city_raw)
+    if city_id is not None and normalized_alias is not None:
         alias_kind = (
             "legitimate_name"
             if resolution["raw_value_type"] == "legitimate_name"
@@ -735,9 +736,9 @@ def apply_location_resolution(cursor, concert: Concert, resolution: dict[str, An
                   AND source_scope IS NOT DISTINCT FROM %s
             )
             """,
-            (city_id, concert.city_raw, normalize_city_key(concert.city_raw), alias_kind,
+            (city_id, concert.city_raw, normalized_alias, alias_kind,
              source_scope, resolution["source_url"], model,
-             city_id, normalize_city_key(concert.city_raw), source_scope),
+             city_id, normalized_alias, source_scope),
         )
 
     changes = []

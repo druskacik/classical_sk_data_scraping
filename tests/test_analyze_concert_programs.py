@@ -559,6 +559,24 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             2,
         )
 
+    def test_skips_alias_for_empty_city_sentinel(self):
+        cursor = MagicMock()
+        concert = analyzer.Concert(
+            1, "Test", date.today(), "https://example.test", None,
+            city_raw="NaN", country_code_raw="CZ", source="Test source",
+        )
+        resolution = {
+            "status": "existing_city", "city_id": 7, "country_code": "IT",
+            "raw_value_type": "extraction_artifact", "source_url": concert.url,
+            "evidence": "The page identifies Sterzing.",
+        }
+
+        analyzer.apply_location_resolution(cursor, concert, resolution, "test-model")
+
+        queries = [call.args[0] for call in cursor.execute.call_args_list]
+        self.assertFalse(any("INSERT INTO city_alias" in query for query in queries))
+        self.assertTrue(any("UPDATE classical_concert" in query for query in queries))
+
     def test_rejects_date_update_that_would_duplicate_a_concert(self):
         conn = MagicMock()
         cursor = conn.cursor.return_value.__enter__.return_value
