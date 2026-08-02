@@ -76,6 +76,21 @@ class BaseCrawler:
         configure_logging()
         context = {'crawler': self.config.slug, 'source_url': self.config.source_url}
         logger.info('Getting concerts', extra={'event': 'crawler_started', **context})
+        try:
+            return self._run(context)
+        except Exception as error:
+            logger.exception(
+                'Crawler failed',
+                extra={
+                    'event': 'crawler_failed',
+                    'error_type': type(error).__name__,
+                    'error_message': str(error),
+                    **context,
+                },
+            )
+            raise
+
+    def _run(self, context: dict[str, str]):
         records = self.scrape()
         logger.info(
             'Scrape completed',
