@@ -22,6 +22,11 @@ testing.
 
 ## Architecture
 
+### Production services
+
+- **`classical-bot`** — Built from `Dockerfile`; starts `python main.py` and runs the scheduled crawlers and analyzers.
+- **`classical-crawler-factory`** — Deployed through `captain-definition-crawler-factory`, which selects `Dockerfile.crawler-factory`; starts `python -m automation.run_crawler_factory_service` and creates, validates, and publishes crawler changes. It does not run the normal concert pipeline.
+
 ### Pipeline flow
 
 1. **Crawlers** (`crawlers/<country_code>/<site>/main.py`) — Each crawler has a `main()` function that scrapes a specific website, saves results to `data/<site>.csv`, and uploads to the DB via `upload_concerts()`.
@@ -53,3 +58,5 @@ Create `crawlers/<country_code>/<site_domain>/main.py` with a `main()` function.
 ## General notes
 
 If I ask you to analyse the data, I mean to analyse the production database with the `agent_utils/search_db.py` script unless I tell you otherwise.
+
+When production runtime behavior or failures require log evidence, use the `search-production-logs` skill to query VictoriaLogs. It expects the private base URL in `VICTORIALOGS_URL`.

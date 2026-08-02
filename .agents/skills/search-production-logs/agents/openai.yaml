@@ -1,0 +1,4 @@
+interface:
+  display_name: "Search Production Logs"
+  short_description: "Query ClassicalBot logs in VictoriaLogs"
+  default_prompt: "Use $search-production-logs to investigate recent production crawler failures."
