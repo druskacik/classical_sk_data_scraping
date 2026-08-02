@@ -46,3 +46,14 @@ Enrich a downloaded artist CSV with official-homepage and other URL relations:
 uv run python -m source_discovery.musicbrainz.download_classical_artists \
   --enrich-urls-from data/musicbrainz_classical_artists.csv
 ```
+
+## ClassicalConcertMap
+
+Discover organization homepages and compile a new crawler-source seed:
+
+```bash
+uv run python -m source_discovery.classicalconcertmap \
+  --discovery-output data/classicalconcertmap_org_sources.csv \
+  --seed-output seeds/crawler_sources/0004_classicalconcertmap_discovered_sources.csv
+```
+
