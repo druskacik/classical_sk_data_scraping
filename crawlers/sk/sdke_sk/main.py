@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 def extract_data_ids():
     current_month = datetime.now().replace(day=1)
@@ -13,7 +14,7 @@ def extract_data_ids():
     for _ in range(12):
         current_month_str = current_month.strftime('%Y%m')
         url = f"{base_url}{current_month_str}"
-        print(url)
+        log_message('Fetching programme', event='crawler_url_fetch', url=url)
         r = requests.get(url)
         soup = BeautifulSoup(r.content, 'html.parser')
         spans_with_data_id = soup.find_all('span', attrs={'data-id': True})
@@ -25,7 +26,7 @@ def extract_data_ids():
 
 def extract_concert_data(data_id):
     url = f"https://www.sdke.sk/sk/api/{data_id}"
-    print(url)
+    log_message('Fetching event API', event='crawler_url_fetch', url=url)
     r = requests.get(url)
     return r.json()
 
@@ -75,7 +76,7 @@ def extract_date_and_time(date_str):
     return date_obj, time_part
 
 def extract_description(url):
-    print(url)
+    log_message('Fetching concert detail', event='crawler_url_fetch', url=url)
     r = requests.get(url)
     soup = BeautifulSoup(r.text, 'html.parser')
     description = soup.find('div', class_='field--name-field-play-description').get_text().strip()

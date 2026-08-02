@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 from ...extractors import clean_string
 
 import json
@@ -35,7 +36,7 @@ def parse_json(json_str):
         }
 
 def extract_concert_performances(concert_url):
-    print(concert_url)
+    log_message('Fetching concert detail', event='crawler_url_fetch', url=concert_url)
     if not concert_url.startswith('https://predpredaj.zoznam.sk/sk/listky/'):
         return []
 
@@ -128,7 +129,7 @@ class PredpredajCrawler(BaseCrawler):
                 try:
                     concert_data.append(future.result())
                 except Exception as exc:
-                    print(f'Error extracting Predpredaj event: {exc}')
+                    log_message('Error extracting Predpredaj event', event='crawler_item_failed', level=30, error_type=type(exc).__name__, error_message=str(exc))
         return [item for sublist in concert_data for item in sublist]
 
     def transform(self, df):

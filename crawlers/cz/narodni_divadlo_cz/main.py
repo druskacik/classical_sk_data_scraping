@@ -8,6 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 
 BASE_URL = 'https://www.narodni-divadlo.cz'
@@ -109,7 +110,7 @@ def extract_production_detail(session, production):
         data = get_page_data(session, url)
         detail = data['props']['pageProps']['productionData']['production']
     except (KeyError, TypeError, ValueError, requests.RequestException) as exc:
-        print(f'Failed to scrape production detail {url}: {exc}')
+        log_message('Failed to scrape production detail', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
         return {
             'url': url,
             'description': clean_text(production.get('title')),

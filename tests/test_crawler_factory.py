@@ -687,6 +687,22 @@ class PullRequestScopeTests(unittest.TestCase):
             with self.subTest(crawler=main_path.parent.relative_to(root)):
                 validate_directory(root, main_path.parent.relative_to(root))
 
+    def test_generated_crawler_print_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            directory = Path("crawlers/cz/example_cz")
+            main_path = workspace / directory / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text(
+                "def main():\n"
+                "    print('starting')\n"
+                "    ExampleCrawler().run()\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(PullRequestValidationError, "structured logging"):
+                validate_directory(workspace, directory)
+
     def test_invalid_python_syntax_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary)

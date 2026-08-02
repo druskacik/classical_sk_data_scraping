@@ -79,6 +79,12 @@ Only modify the expected new crawler directory. Do not modify shared crawler
 code, dependencies, workflows, prompts, configuration, environment files, or
 other crawlers. Do not commit or push changes.
 
+Use the repository's structured logger for operational output:
+`from observability import log_message`. Do not call `print()` from a production
+crawler; generated crawler PR validation rejects it. Prefer structured fields
+such as `url`, `record_count`, `error_type`, and `error_message`, and never log
+raw HTML, full event descriptions, credentials, or tokens.
+
 Implement the crawler as a `BaseCrawler` subclass with a `scrape()` method.
 During investigation and testing call `scrape()` directly. Do not call
 `BaseCrawler.run()`, upload data, connect to the database, or write a CSV.

@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 
 BASE_URL = 'https://www.pragueticketoffice.com'
@@ -109,7 +110,7 @@ def extract_cards(soup, session, description_cache):
         try:
             description = detail_description(session, url, description_cache) or fallback
         except requests.RequestException as exc:
-            print(f'Failed to scrape concert detail {url}: {exc}')
+            log_message('Failed to scrape concert detail', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
             description = fallback
 
         concerts.append(

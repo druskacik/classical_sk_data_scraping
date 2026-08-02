@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 
 BASE_URL = 'https://www.fok.cz'
@@ -160,7 +161,7 @@ def get_concerts():
         try:
             soup = get_soup(session, url)
         except requests.RequestException as exc:
-            print(f'Failed to scrape {url}: {exc}')
+            log_message('Failed to scrape event', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
             continue
 
         concerts.extend(extract_ticket_rows(soup, url))

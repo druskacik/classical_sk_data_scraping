@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 from ...extractors import extract_date, extract_time
 from ...formaters import format_date
 
@@ -66,7 +67,7 @@ def clean_composer_name(name):
 def extract_composers(url):
     if not url:
         return []
-    print(url)
+    log_message('Fetching concert detail', event='crawler_url_fetch', url=url)
     r = requests.get(url)
     soup = BeautifulSoup(r.content, 'html.parser')
     

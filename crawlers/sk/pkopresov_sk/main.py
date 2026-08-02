@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 from ...extractors import extract_date, extract_time
 from ...formaters import format_date
 
@@ -15,7 +16,7 @@ def extract_event_url(concert):
 
 def crawl_event_urls():
     url = 'https://podujatia.pkopresov.sk/'
-    print(url)
+    log_message('Fetching listing', event='crawler_url_fetch', url=url)
     r = requests.get(url, timeout=20)
     soup = BeautifulSoup(r.text, 'html.parser')
     posts_widget = soup.find('div', class_='elementor-element', attrs={'data-widget_type': 'tootoot-event-list.tiles'})
@@ -27,7 +28,7 @@ def crawl_event_urls():
     page = 1
     while True:
         url = f'https://podujatia.pkopresov.sk/wp-json/elementor-pro/v1/posts-widget?post_id=1100&element_id={data_id}&page={page}'
-        print(url)
+        log_message('Fetching listing page', event='crawler_url_fetch', url=url)
         r = requests.get(url, timeout=20)
         data = r.json()
         soup = BeautifulSoup(data['content'], 'html.parser')
@@ -43,7 +44,7 @@ def crawl_event_urls():
     return [url for url in event_urls if '/event-detail/' in url]
 
 def extract_event_info(url):
-    print(url)
+    log_message('Fetching event detail', event='crawler_url_fetch', url=url)
     r = requests.get(url, timeout=20)
     soup = BeautifulSoup(r.text, 'html.parser')
     script = soup.find('script', type='application/ld+json')
@@ -91,7 +92,7 @@ class PkoPresovCrawler(BaseCrawler):
                 try:
                     concert = future.result()
                 except Exception as exc:
-                    print(f'Error extracting PKO Prešov event: {exc}')
+                    log_message('Error extracting PKO Prešov event', event='crawler_item_failed', level=30, error_type=type(exc).__name__, error_message=str(exc))
                     continue
                 if concert is not None:
                     concerts.append(concert)

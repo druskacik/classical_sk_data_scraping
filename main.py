@@ -1,13 +1,16 @@
 import schedule
 import time
 import importlib
+import logging
 import os
 from pathlib import Path
 
 from deployment.scraper_updater import ScraperUpdater, UpdaterConfig
+from observability import configure_logging
 
 
 RUN_JOBS_ON_STARTUP_ENV = "RUN_JOBS_ON_STARTUP"
+logger = logging.getLogger(__name__)
 
 
 def should_run_jobs_on_startup():
@@ -28,7 +31,10 @@ def discover_crawler_modules():
             if hasattr(module, 'main'):
                 crawler_modules.append(module.main)
         except ImportError as e:
-            print(f"Failed to import {module_path}: {e}")
+            logger.exception(
+                "Failed to import crawler module",
+                extra={"event": "crawler_import_failed", "crawler_module": module_path},
+            )
     
     return crawler_modules
 
@@ -36,9 +42,13 @@ def run_job(main_function):
     try:
         main_function()
     except Exception as e:
-        print(f"Error running {main_function.__name__}: {e}")
+        logger.exception(
+            "Scheduled job failed",
+            extra={"event": "job_failed", "job": main_function.__name__},
+        )
 
 if __name__ == "__main__":
+    configure_logging("classical-bot")
     # Discover all crawler modules
     crawler_functions = discover_crawler_modules()
     
@@ -50,7 +60,10 @@ if __name__ == "__main__":
     updater = ScraperUpdater(UpdaterConfig.from_environment())
     
     if should_run_jobs_on_startup():
-        print(f"{RUN_JOBS_ON_STARTUP_ENV} is enabled; running all jobs immediately...")
+        logger.info(
+            "Running all jobs immediately on startup",
+            extra={"event": "startup_jobs_enabled"},
+        )
         updater.begin_daily_pipeline()
         try:
             for func in crawler_functions:
@@ -58,9 +71,12 @@ if __name__ == "__main__":
         finally:
             updater.finish_daily_pipeline()
     else:
-        print(f"Skipping immediate job run; set {RUN_JOBS_ON_STARTUP_ENV}=true to enable it.")
+        logger.info(
+            "Skipping immediate job run",
+            extra={"event": "startup_jobs_skipped"},
+        )
     
-    print("Scheduling crawlers...")
+    logger.info("Scheduling crawlers", extra={"event": "scheduler_started"})
     schedule.every().day.at("00:00").do(updater.begin_daily_pipeline)
     # Schedule all crawlers to run at 2-minute intervals starting at 00:01.
     for i, func in enumerate(crawler_functions):

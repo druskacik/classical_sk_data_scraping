@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 import threading
@@ -18,9 +19,11 @@ from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from agent_utils.concert_catalog import normalize
 from crawlers.cities import normalize_city_key
+from observability import configure_logging
 
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_LIMIT = 200
@@ -469,7 +472,15 @@ def validate_event_updates(
                 }
             )
         except (KeyError, TypeError, ValueError) as error:
-            print(f"Ignoring invalid event update for concert {concert.id}: {error}")
+            logger.warning(
+                "Ignoring invalid event update",
+                extra={
+                    "event": "programme_event_update_invalid",
+                    "concert_id": concert.id,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                },
+            )
     return accepted
 
 
@@ -528,7 +539,15 @@ def validate_location_resolution(
             return {"status": "existing_city", "city_id": existing[0], "country_code": country, "raw_value_type": raw_type, "source_url": source_url, "evidence": evidence}
         return {"status": status, "country_code": country, "raw_value_type": raw_type, "source_url": source_url, "evidence": evidence, **values}
     except (KeyError, TypeError, ValueError) as error:
-        print(f"Ignoring invalid location resolution for concert {concert.id}: {error}")
+        logger.warning(
+            "Ignoring invalid location resolution",
+            extra={
+                "event": "programme_location_resolution_invalid",
+                "concert_id": concert.id,
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+            },
+        )
         return None
 
 
@@ -921,14 +940,20 @@ def run(
             expire_old_no_program(conn)
         concerts = select_concerts(conn, concert_ids, limit, force, unresolved_locations)
         if not concerts:
-            print("No concerts eligible for programme analysis.")
+            logger.info(
+                "No concerts eligible for programme analysis",
+                extra={"event": "programme_queue_empty"},
+            )
             return 0
         with Codex(
             CodexConfig(codex_bin=os.getenv("CODEX_BIN"), cwd=str(Path.cwd()))
         ) as codex:
             validate_model(codex, model)
             for concert in concerts:
-                print(f"Analyzing concert {concert.id}: {concert.title}")
+                logger.info(
+                    "Analyzing concert programme",
+                    extra={"event": "programme_analysis_started", "concert_id": concert.id},
+                )
                 try:
                     result = run_agent(codex, concert, model, timeout_seconds)
                     validate_result(conn, concert, result)
@@ -943,16 +968,38 @@ def run(
                         result.get("location_resolution", {"status": "not_needed"}),
                         page_available=result["status"] != "page_unavailable",
                     )
-                    print(json.dumps({"concert_id": concert.id, **result}, ensure_ascii=False, indent=2))
+                    logger.info(
+                        "Concert programme analysis completed",
+                        extra={
+                            "event": "programme_analysis_completed",
+                            "concert_id": concert.id,
+                            "status": result["status"],
+                            "composer_count": len(result.get("composers") or []),
+                            "unresolved_count": len(result.get("unresolved_program") or []),
+                            "commit": commit,
+                            **({} if commit else {"analysis_result": result}),
+                        },
+                    )
                     if commit:
                         persist_result(
                             conn, concert, result, model, event_updates, location_resolution
                         )
                     else:
-                        print("DRY RUN: no database changes made")
+                        logger.info(
+                            "Dry run; no database changes made",
+                            extra={"event": "programme_analysis_dry_run", "concert_id": concert.id},
+                        )
                 except Exception as error:
                     failures += 1
-                    print(f"Concert {concert.id} failed: {error}")
+                    logger.exception(
+                        "Concert programme analysis failed",
+                        extra={
+                            "event": "programme_analysis_failed",
+                            "concert_id": concert.id,
+                            "error_type": type(error).__name__,
+                            "error_message": str(error),
+                        },
+                    )
                     if commit:
                         persist_error(conn, concert, model, error)
         return failures
@@ -963,6 +1010,7 @@ def run(
 
 
 def scheduled_main() -> None:
+    configure_logging("classical-bot")
     failures = run(commit=True)
     if failures:
         raise RuntimeError(f"{failures} concert programme analyses failed")
@@ -985,6 +1033,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    configure_logging("classical-bot")
     args = parse_args()
     failures = run(
         concert_ids=args.concert_ids,

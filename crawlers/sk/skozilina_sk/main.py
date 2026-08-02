@@ -8,9 +8,10 @@ from bs4 import BeautifulSoup
 import pandas as pd
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 def extract_description(url):
-    print(url)
+    log_message('Fetching concert detail', event='crawler_url_fetch', url=url)
     r = requests.get(url)
     soup = BeautifulSoup(r.text, 'html.parser')
     program = soup.find('div', class_='program')
@@ -36,7 +37,7 @@ class SkozilinaCrawler(BaseCrawler):
         while True:
             url = f'https://skozilina.sk/kalendar/month/{current_year}-{current_month:02d}'
 
-            print(f'Getting concerts for {url} ...')
+            log_message('Fetching concerts', event='crawler_url_fetch', url=url)
             r = requests.get(url)
             soup = BeautifulSoup(r.content, 'html.parser')
             script_tags = soup.find_all('script', type='application/ld+json')

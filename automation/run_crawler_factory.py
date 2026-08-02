@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import logging
 import os
 import re
 import shutil
@@ -17,6 +18,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
+from observability import configure_logging
 
 from automation.crawler_registry import CrawlerRegistry
 from build_crawlers_with_codex import MODEL, country_code_for_url, crawler_folder_name
@@ -35,6 +37,7 @@ ALLOWED_REASON_CODES = {
     "no_parseable_source",
     "implementation_failed",
 }
+logger = logging.getLogger(__name__)
 ALLOWED_CHILD_ENV = {
     "CODEX_BIN",
     "CODEX_HOME",
@@ -449,7 +452,15 @@ def reconcile_pull_requests(registry: CrawlerRegistry, workspace: Path) -> dict[
             )
             data = json.loads(result.stdout)
         except Exception as exc:
-            print(f"Could not reconcile {pr_url}: {type(exc).__name__}: {exc}")
+            logger.warning(
+                "Could not reconcile pull request",
+                extra={
+                    "event": "factory_pr_reconcile_failed",
+                    "pull_request_url": pr_url,
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+            )
             continue
         ids = [source["id"] for source in sources]
         if data.get("state") == "CLOSED" and not data.get("mergedAt"):
@@ -682,11 +693,22 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
         report_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
         if not successful_source_ids:
             registry.finish_run(run_id, "no_changes")
-            print(f"No generated changes; report: {report_path}")
+            logger.info(
+                "Factory batch produced no changes",
+                extra={"event": "factory_batch_no_changes", "report_path": str(report_path)},
+            )
             return
         if args.no_push:
             registry.finish_run(run_id, "failed")
-            print(f"Created {len(successful_source_ids)} commits in {workspace}; report: {report_path}")
+            logger.info(
+                "Factory commits created without push",
+                extra={
+                    "event": "factory_commits_created",
+                    "commit_count": len(successful_source_ids),
+                    "workspace": str(workspace),
+                    "report_path": str(report_path),
+                },
+            )
             args.keep_workspace = True
             return
 
@@ -719,7 +741,10 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
         except Exception:
             registry.transition_sources(successful_source_ids, "needs_attention")
             raise
-        print(f"Opened auto-merge PR: {pr_url}")
+        logger.info(
+            "Opened auto-merge pull request",
+            extra={"event": "factory_pull_request_opened", "pull_request_url": pr_url},
+        )
     except Exception:
         if run_created:
             registry.finish_run(run_id, "failed")
@@ -730,6 +755,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
 
 
 def main() -> None:
+    configure_logging("classical-crawler-factory")
     args = parse_args()
     load_dotenv()
     args.lock_path.parent.mkdir(parents=True, exist_ok=True)

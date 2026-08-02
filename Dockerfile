@@ -5,7 +5,9 @@ ARG CAPROVER_GIT_COMMIT_SHA
 # Set the working directory
 WORKDIR /app
 
-ENV CAPROVER_GIT_COMMIT_SHA=${CAPROVER_GIT_COMMIT_SHA}
+ENV CAPROVER_GIT_COMMIT_SHA=${CAPROVER_GIT_COMMIT_SHA} \
+    LOG_SERVICE=classical-bot \
+    LOG_LEVEL=INFO
 
 # Copy the pyproject.toml and other necessary files
 COPY pyproject.toml ./

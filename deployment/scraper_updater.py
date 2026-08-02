@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,10 +10,27 @@ from deployment.caprover_updater import CapRoverUpdater, CapRoverUpdaterConfig
 
 DEFAULT_REPOSITORY = "https://github.com/druskacik/classical_bot.git"
 DEFAULT_STATE_PATH = Path("/var/lib/classical-bot/deployment-state.json")
+logger = logging.getLogger(__name__)
 
 
 def log(message: str) -> None:
-    print(f"[scraper-updater] {message}", flush=True)
+    event = "scraper_update_status"
+    if message.startswith("Requested CapRover deployment"):
+        event = "deployment_requested"
+    elif message.startswith("Could not request CapRover deployment"):
+        event = "deployment_request_failed"
+    elif message.startswith("Could not check master"):
+        event = "deployment_check_failed"
+    elif message.startswith("Automatic updates disabled"):
+        event = "deployment_updates_disabled"
+    elif message.startswith("Ignoring unreadable deployment state"):
+        event = "deployment_state_invalid"
+    elif message.startswith("Daily pipeline started"):
+        event = "daily_pipeline_started"
+    elif message.startswith("Daily pipeline finished"):
+        event = "daily_pipeline_finished"
+    level = logging.WARNING if event.endswith(("_failed", "_invalid", "_disabled")) else logging.INFO
+    logger.log(level, message, extra={"event": event})
 
 
 @dataclass(frozen=True)

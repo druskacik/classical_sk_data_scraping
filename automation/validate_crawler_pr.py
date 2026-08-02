@@ -121,6 +121,17 @@ def validate_directory(workspace: Path, directory: Path) -> dict:
         raise PullRequestValidationError(
             f"{directory} main() must call the crawler's run() method"
         )
+    print_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "print"
+    ]
+    if print_calls:
+        raise PullRequestValidationError(
+            f"{directory} must use structured logging instead of print()"
+        )
     return {"status": "passed", "kind": "crawler"}
 
 

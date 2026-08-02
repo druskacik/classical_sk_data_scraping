@@ -36,6 +36,8 @@ ENV PYTHONUNBUFFERED=1 \
     CRAWLER_FACTORY_MAX_URLS=5 \
     CRAWLER_FACTORY_TIMEOUT_MINUTES=60 \
     CRAWLER_FACTORY_VALIDATION_TIMEOUT_MINUTES=15 \
+    LOG_SERVICE=classical-crawler-factory \
+    LOG_LEVEL=INFO \
     CAPROVER_GIT_COMMIT_SHA=${CAPROVER_GIT_COMMIT_SHA}
 
 VOLUME ["/var/lib/crawler-factory", "/factory-home", "/factory-codex-home"]

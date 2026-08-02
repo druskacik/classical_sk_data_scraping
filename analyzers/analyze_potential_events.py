@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import logging
 import psycopg2
 from dotenv import load_dotenv
 
@@ -8,8 +9,10 @@ from google import genai
 from google.genai import types
 
 from analyzers.utils import generate_with_retry
+from observability import configure_logging
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 prompt = """
 You will receive a JSON with various information about an event. Your role is to decide whether the event is classical music event or not.
@@ -83,10 +86,17 @@ def upload_classical_concerts(conn):
         cursor.execute("UPDATE potential_event SET added = true WHERE id = %s", (concert[0],))
 
     conn.commit()
-    print(f"Skipped {skipped_count} concerts")
-    print(f"Uploaded {len(concerts) - skipped_count} concerts")
+    logger.info(
+        "Potential-event upload completed",
+        extra={
+            "event": "potential_event_upload_completed",
+            "inserted_count": len(concerts) - skipped_count,
+            "skipped_count": skipped_count,
+        },
+    )
 
 def main():
+    configure_logging("classical-bot")
     client = genai.Client(api_key=os.getenv('GEMINI_API_KEY'))
     DB_NAME = os.getenv('DB_NAME')
     DB_USER = os.getenv('DB_USER')
@@ -104,10 +114,20 @@ def main():
             event_json = json.dumps(dict(zip(column_names, event)), ensure_ascii=False)
             output = is_classical_music_event(client, event_json)
             output = True if output == 'true' else False
-            print(f"Analyzed event {event_json}: {output}")
+            logger.info(
+                "Potential event analyzed",
+                extra={
+                    "event": "potential_event_analyzed",
+                    "potential_event_id": event[0],
+                    "is_classical_concert": output,
+                },
+            )
             update_potential_event(conn, event[0], output)
     else:
-        print("No potential events to analyze.")
+        logger.info(
+            "No potential events to analyze",
+            extra={"event": "potential_event_queue_empty"},
+        )
         
     upload_classical_concerts(conn)
     conn.close()

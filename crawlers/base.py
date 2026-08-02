@@ -1,12 +1,15 @@
 from dataclasses import dataclass, field
+import logging
 from typing import Any, Literal
 
 import pandas as pd
 
 from .classical import upload_concerts, upload_potential_concerts
+from observability import configure_logging
 
 
 UploadTarget = Literal['classical', 'potential']
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -70,20 +73,36 @@ class BaseCrawler:
         return df.to_dict(orient='records')
 
     def run(self):
-        print(f'Getting concerts for {self.config.slug.replace("_", ".")} ...')
+        configure_logging()
+        context = {'crawler': self.config.slug, 'source_url': self.config.source_url}
+        logger.info('Getting concerts', extra={'event': 'crawler_started', **context})
         records = self.scrape()
-        print(f'Found {len(records)} concerts')
+        logger.info(
+            'Scrape completed',
+            extra={'event': 'crawler_scrape_completed', 'record_count': len(records), **context},
+        )
 
         records = self.prepare_records(records)
         df = pd.DataFrame(records)
 
         save_path = self.config.save_path
         df.to_csv(save_path, index=False)
-        print(f'Saved to {save_path}')
-
-        print(f'Prepared {len(records)} concerts for upload')
-
-        print('Uploading concerts to the API ...')
+        logger.info(
+            'CSV backup saved',
+            extra={'event': 'crawler_csv_saved', 'path': save_path, 'record_count': len(records), **context},
+        )
+        logger.info(
+            'Uploading concerts',
+            extra={'event': 'crawler_upload_started', 'record_count': len(records), **context},
+        )
         inserted_count, skipped_count = self.upload(records)
-        print(f'Uploaded {inserted_count} concerts, skipped {skipped_count} concerts')
+        logger.info(
+            'Upload completed',
+            extra={
+                'event': 'crawler_upload_completed',
+                'inserted_count': inserted_count,
+                'skipped_count': skipped_count,
+                **context,
+            },
+        )
         return records

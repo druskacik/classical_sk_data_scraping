@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 from ...extractors import clean_string, extract_city, extract_time
 
 URL = 'https://simachart.weebly.com/bude.html'
@@ -47,7 +48,7 @@ def extract_concerts(soup):
             if concert is not None:
                 concerts.append(concert)
         except Exception as e:
-            print(f"Error extracting concert info: {e}")
+            log_message('Error extracting concert info', event='crawler_item_failed', level=30, error_type=type(e).__name__, error_message=str(e))
     return concerts
 
 

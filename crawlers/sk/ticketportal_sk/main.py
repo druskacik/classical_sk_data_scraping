@@ -6,6 +6,7 @@ import re
 import pandas as pd
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 ALREADY_PARSED_ORGANIZERS = [
     'https://www.ticketportal.sk/NEvent/SLOVENSKA_FILHARMONIA'
@@ -149,7 +150,7 @@ class TicketportalCrawler(BaseCrawler):
         concert_data = []
         for _, row in df.iterrows():
             url = f'https://www.ticketportal.sk/event/{row["slug"]}'
-            print(f'Processing {url}')
+            log_message('Processing URL', event='crawler_url_processing', url=url)
             r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
             soup = BeautifulSoup(r.text, 'html.parser')
             description = extract_description(soup)
@@ -164,8 +165,10 @@ class TicketportalCrawler(BaseCrawler):
                     }
                     concert_data.append(concert_info)
                 except Exception as e:
-                    print(f'Error processing div in {url}: {div}')
-                    print(e)
+                    log_message(
+                        'Error processing event block', event='crawler_item_failed', level=30,
+                        url=url, error_type=type(e).__name__, error_message=str(e),
+                    )
 
         return concert_data
 

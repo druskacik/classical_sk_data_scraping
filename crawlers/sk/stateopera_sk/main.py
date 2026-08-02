@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 from ...formaters import clean_string
 
 MONTH_TO_NUMBER = {
@@ -43,7 +44,7 @@ def extract_concert_info(concert):
 	}
     
 def extract_description(url):
-    print(url)
+    log_message('Fetching concert detail', event='crawler_url_fetch', url=url)
     r = requests.get(url)
     soup = BeautifulSoup(r.content, 'html.parser')
     description = soup.find('div', class_='longtext').text.strip()

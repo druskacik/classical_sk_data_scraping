@@ -2,6 +2,7 @@ import random
 import requests
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 def get_access_token():
     url = 'https://www.cultusruzinov.sk/_api/v1/access-tokens'
@@ -19,7 +20,7 @@ def get_event_slugs(access_token):
 
 def get_event_data(slug, access_token):
     url = f'https://www.cultusruzinov.sk/_api/wix-one-events-server/html/page-data/{slug}'
-    print(url)
+    log_message('Fetching event detail', event='crawler_url_fetch', url=url)
     r = requests.get(url, headers={'authorization': access_token})
     response = r.json()
     
@@ -62,10 +63,10 @@ class CultusRuzinovCrawler(BaseCrawler):
         while n_attempts < max_attempts:
             try:
                 slugs = get_event_slugs(access_token)
-                print(f'Found {len(slugs)} concerts. Fetching data ...')
+                log_message('Concert URLs discovered', event='crawler_urls_discovered', level=20, record_count=len(slugs))
                 return [get_event_data(slug, access_token) for slug in slugs]
             except Exception as e:
-                print(f'Error: {e}')
+                log_message('Crawler attempt failed', event='crawler_attempt_failed', level=30, error_type=type(e).__name__, error_message=str(e))
                 n_attempts += 1
                 if n_attempts == max_attempts:
                     raise e

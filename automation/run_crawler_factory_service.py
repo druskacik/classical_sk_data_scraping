@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 import signal
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, time as wall_time
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from observability import configure_logging
 
 from deployment.caprover_updater import (
     CapRoverUpdater,
@@ -21,10 +23,31 @@ from deployment.caprover_updater import (
 
 DEFAULT_SERVICE_STATE_PATH = Path("/var/lib/crawler-factory/service-state.json")
 DEFAULT_REPOSITORY = "https://github.com/druskacik/classical_bot.git"
+logger = logging.getLogger(__name__)
 
 
 def log(message: str) -> None:
-    print(f"[crawler-factory-service] {message}", flush=True)
+    event = "factory_service_status"
+    if message.startswith("Requested CapRover deployment"):
+        event = "deployment_requested"
+    elif message.startswith("Could not request CapRover deployment"):
+        event = "deployment_request_failed"
+    elif message.startswith("Could not check master"):
+        event = "deployment_check_failed"
+    elif message.startswith("Automatic updates disabled"):
+        event = "deployment_updates_disabled"
+    elif message.startswith("Ignoring unreadable deployment state"):
+        event = "deployment_state_invalid"
+    elif message.startswith("Starting daily crawler-factory batch"):
+        event = "factory_batch_started"
+    elif message.startswith("Daily batch finished"):
+        event = "factory_batch_completed"
+    elif message.startswith("Received signal"):
+        event = "factory_service_signal_received"
+    elif message == "Stopped":
+        event = "factory_service_stopped"
+    level = logging.WARNING if event.endswith(("_failed", "_invalid", "_disabled")) else logging.INFO
+    logger.log(level, message, extra={"event": event})
 
 
 def positive_integer(value: str, name: str) -> int:
@@ -214,6 +237,7 @@ class FactoryService:
 
 
 def main() -> None:
+    configure_logging("classical-crawler-factory")
     try:
         config = ServiceConfig.from_environment()
     except ValueError as exc:

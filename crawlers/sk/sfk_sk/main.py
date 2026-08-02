@@ -4,6 +4,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 def validate_concert(concert):
     # Check if both start and end dates exist and if the difference is more than 1 day
@@ -52,7 +53,7 @@ def extract_concert_info(concert):
     }
     
 def extract_description(url):
-    print(url)
+    log_message('Fetching concert detail', event='crawler_url_fetch', url=url)
     r = requests.get(url)
     soup = BeautifulSoup(r.text, 'html.parser')
     div = soup.find('div', class_='richtext', attrs={'aria-readonly': 'false'})
@@ -102,4 +103,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

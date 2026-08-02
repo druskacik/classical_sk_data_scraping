@@ -8,6 +8,7 @@ import urllib3
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 def convert_date(date_str):
     """
@@ -56,7 +57,7 @@ def get_concert_data(url: str):
     return data
 
 def extract_description(url):
-    print(url)
+    log_message('Fetching concert detail', event='crawler_url_fetch', url=url)
     r = requests.get(url, verify=False, timeout=20)
     soup = BeautifulSoup(r.text, 'html.parser')
     description = soup.find('meta', attrs={'property': 'og:description'})
@@ -95,16 +96,16 @@ class SndCrawler(BaseCrawler):
             current_season_year = current_season_year - 1
             for month in range(current_month, 6 + 1):
                 url = f'{base_url}{current_season_year}-{current_season_year+1}/{month:02d}'
-                print(f'Getting concerts for {url} ...')
+                log_message('Fetching concerts', event='crawler_url_fetch', url=url)
                 concert_data.extend(get_concert_data(url))
         else:
             for month in range(current_month, 12 + 1):
                 url = f'{base_url}{current_season_year}-{current_season_year+1}/{month:02d}'
-                print(f'Getting concerts for {url} ...')
+                log_message('Fetching concerts', event='crawler_url_fetch', url=url)
                 concert_data.extend(get_concert_data(url))
             for month in range(1, 6 + 1):
                 url = f'{base_url}{current_season_year+1}-{current_season_year+2}/{month:02d}'
-                print(f'Getting concerts for {url} ...')
+                log_message('Fetching concerts', event='crawler_url_fetch', url=url)
                 concert_data.extend(get_concert_data(url))
 
         return concert_data

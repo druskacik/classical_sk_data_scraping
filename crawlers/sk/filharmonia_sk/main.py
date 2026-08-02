@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from ...base import BaseCrawler, CrawlerConfig
+from observability import log_message
 
 def get_concerts():
     today = date.today()
@@ -25,7 +26,7 @@ def get_concert_description(url):
     """
     Get concert description from filharmonia.sk
     """
-    print(url)
+    log_message('Fetching concert detail', event='crawler_url_fetch', url=url)
     r = requests.get(url)
     soup = BeautifulSoup(r.content, 'html.parser')
     div = soup.find('div', class_='region-content')
