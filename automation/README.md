@@ -12,8 +12,12 @@ shared with the normal scraper runner through `deployment/caprover_updater.py`.
 Each batch clones `master` into a temporary directory, atomically claims at
 most five due sources from PostgreSQL, commits generated `main.py` or
 `BLOCKED.md` results, opens one pull request, and enables squash auto-merge.
-Codex runs with the
-`workspace-write` sandbox inside the disposable clone.
+Codex runs with full filesystem access inside the dedicated worker container and
+its disposable clone. The worker passes only an allow-listed child environment,
+rejects changes outside the assigned crawler directory, resets failed attempts,
+and validates generated crawlers before committing them. Avoiding a second,
+nested Codex filesystem sandbox keeps the worker compatible with container
+runtimes that do not permit nested sandbox namespaces.
 
 Codex investigates and implements each crawler with targeted parser checks. For
 a generated `main.py`, the worker performs one authoritative full scrape before

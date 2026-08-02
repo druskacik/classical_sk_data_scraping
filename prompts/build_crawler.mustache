@@ -6,7 +6,9 @@ What should the crawler do:
   the site still publishes them
 - create a universal script that scrapes the concert details
 
-For inspiration, see examples in @crawlers folder.
+Before implementing, inspect `crawlers/base.py` and at least one current
+`crawlers/<country_code>/<site>/main.py` example. Use the repository's current
+interfaces exactly; do not rely on remembered crawler APIs.
 
 To investigate the website, use the Playwright MCP. First, investigate if you can reconstruct some API from the network requests - that would be the easiest, since it usually has the structured data. If you can't find it in network requests, go for HTML parsing.
 
@@ -35,12 +37,43 @@ Do not upload every event from a mixed source directly as classical music.
 What I mean by description: description is a long body of text related to the concert. It can be large and unstructured, and it's important that it includes details about which composers and works are being played (if this is on the website, of course). The reasoning behind this is that the description will be later parsed by AI to extract composers and works.
 
 Save the new crawler at exactly `{{ crawler_directory }}/main.py`. Do not derive
-a different directory from redirects or alternate domains. Set
-`CrawlerConfig.country_code` to `{{ country_code }}`. After building, test it
-with targeted parser checks and inspect representative output records, including
-their date/city/venue pairs and duplicates. Use system `python`, not `uv`, in the
-crawler-factory image. The outer worker performs the authoritative full scrape,
-so you do not need to repeat a slow full-catalogue run solely for final validation.
+a different directory from redirects or alternate domains.
+
+`CrawlerConfig` supports the fields described below. Start with this minimal
+valid configuration and add optional transformation fields when needed:
+
+```python
+config = CrawlerConfig(
+    slug="site_domain",
+    source="Human-readable source name",
+    source_url="https://example.com/",
+    country_code="{{ country_code }}",
+    upload_target="classical",
+)
+```
+
+This example is intentionally minimal. It assumes each dictionary returned by
+`scrape()` already contains the required `source` and `source_url` record
+fields. If those values are constant for every record, prefer adding them with
+`front_fields=[('source_url', SOURCE_URL), ('source', SOURCE)]` instead. The
+configured `source` and `source_url` values are crawler metadata and are not
+automatically copied into scraped records.
+
+Set `slug` to the final directory component of `{{ crawler_directory }}`, and
+set `source_url` to the canonical source URL. The required constructor fields
+are `slug`, `source`, and `source_url`. The supported optional fields are
+`country_code`, `columns`, `upload_target`, `dedupe_subset`, `front_fields`, and
+`csv_path`. Do not invent or use unsupported aliases such as `name` or
+`csv_filename`. Use `upload_target="potential"` for a broad source as described
+above; otherwise retain `"classical"`.
+
+After building, first run a cheap import and instantiation check with system
+`python`, not `uv`, to catch syntax errors and an invalid `CrawlerConfig`
+constructor. Then run targeted parser checks by calling `scrape()` directly and
+inspect representative output records, including their date/city/venue pairs
+and duplicates. Do not invoke the module's production `main()` during testing.
+The outer worker performs the authoritative full scrape, so you do not need to
+repeat a slow full-catalogue run solely for final validation.
 
 Only modify the expected new crawler directory. Do not modify shared crawler
 code, dependencies, workflows, prompts, configuration, environment files, or

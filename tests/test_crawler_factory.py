@@ -206,6 +206,25 @@ class FactoryArgumentTests(unittest.TestCase):
         self.assertIn("must never be empty", normalized)
         self.assertIn("upload_target='classical'", normalized)
         self.assertIn("upload_target` to `potential`", normalized)
+        self.assertIn("inspect `crawlers/base.py`", normalized)
+        self.assertIn("Start with this minimal valid configuration", normalized)
+        self.assertIn('slug="site_domain"', normalized)
+        self.assertIn(
+            "The required constructor fields are `slug`, `source`, and `source_url`",
+            normalized,
+        )
+        self.assertIn("This example is intentionally minimal", normalized)
+        self.assertIn(
+            "are not automatically copied into scraped records",
+            normalized,
+        )
+        self.assertIn(
+            "`front_fields=[('source_url', SOURCE_URL), ('source', SOURCE)]`",
+            normalized,
+        )
+        self.assertIn("`csv_path`", normalized)
+        self.assertIn("unsupported aliases such as `name` or `csv_filename`", normalized)
+        self.assertIn("cheap import and instantiation check", normalized)
 
     def test_repository_defaults_to_environment(self):
         with (
@@ -356,6 +375,10 @@ class AttemptTests(unittest.TestCase):
             def fake_run_command(command, **kwargs):
                 if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
                     self.assertEqual(command[command.index("--model") + 1], "gpt-5.6-luna")
+                    self.assertEqual(
+                        command[command.index("--sandbox") + 1],
+                        "full-access",
+                    )
                     path = workspace / crawler_directory("https://www.hamu.cz/") / "main.py"
                     path.parent.mkdir(parents=True)
                     path.write_text("# useful partial result\n", encoding="utf-8")

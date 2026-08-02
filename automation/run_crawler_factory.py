@@ -335,7 +335,7 @@ def attempt_source(
         str(directory),
         "--retry-blocked",
         "--sandbox",
-        "workspace-write",
+        "full-access",
         "--results",
         str(builder_report),
     ]
