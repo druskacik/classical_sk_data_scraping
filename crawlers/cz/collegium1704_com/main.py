@@ -168,7 +168,7 @@ def get_concerts():
         try:
             html = get_html(session, page_url)
         except requests.RequestException as exc:
-            log_message('Failed to scrape listing', event='crawler_item_failed', level=30, url=page_url, error_type=type(exc).__name__, error_message=str(exc))
+            log_message('Failed to scrape listing', event='crawler_item_failed', level='warning', url=page_url, error_type=type(exc).__name__, error_message=str(exc))
             continue
 
         for event in extract_json_arrays(html):

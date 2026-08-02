@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from observability.logging import LOG_SCHEMA, configure_logging
+from observability.logging import LOG_SCHEMA, configure_logging, log_message
 
 
 class JsonLoggingTests(unittest.TestCase):
@@ -72,6 +72,15 @@ class JsonLoggingTests(unittest.TestCase):
         event = json.loads(buffer.getvalue())
         self.assertEqual(event["error_type"], "ValueError")
         self.assertIn("ValueError: bad value", event["exception"])
+
+    def test_log_message_accepts_readable_level_names(self):
+        buffer = self.configure_with_buffer()
+
+        log_message("Crawler warning", event="crawler_item_failed", level="warning")
+
+        event = json.loads(buffer.getvalue())
+        self.assertEqual(event["level"], "warning")
+        self.assertEqual(event["event"], "crawler_item_failed")
 
 
 if __name__ == "__main__":

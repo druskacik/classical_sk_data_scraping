@@ -175,7 +175,7 @@ def get_concerts():
                 )
                 details[url] = extract_detail(future.result(), fallback)
             except Exception as exc:
-                log_message('Failed to scrape detail', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
+                log_message('Failed to scrape detail', event='crawler_item_failed', level='warning', url=url, error_type=type(exc).__name__, error_message=str(exc))
 
     records = []
     seen = set()

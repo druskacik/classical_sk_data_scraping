@@ -220,7 +220,7 @@ def get_concerts():
         try:
             concerts.append(extract_detail_concert(session, concert))
         except requests.RequestException as exc:
-            log_message('Failed to scrape event', event='crawler_item_failed', level=30, url=concert['url'], error_type=type(exc).__name__, error_message=str(exc))
+            log_message('Failed to scrape event', event='crawler_item_failed', level='warning', url=concert['url'], error_type=type(exc).__name__, error_message=str(exc))
             concerts.append(concert)
 
     return [concert for concert in concerts if concert['title'] and concert['date']]

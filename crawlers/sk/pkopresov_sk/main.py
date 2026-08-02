@@ -92,7 +92,7 @@ class PkoPresovCrawler(BaseCrawler):
                 try:
                     concert = future.result()
                 except Exception as exc:
-                    log_message('Error extracting PKO Prešov event', event='crawler_item_failed', level=30, error_type=type(exc).__name__, error_message=str(exc))
+                    log_message('Error extracting PKO Prešov event', event='crawler_item_failed', level='warning', error_type=type(exc).__name__, error_message=str(exc))
                     continue
                 if concert is not None:
                     concerts.append(concert)

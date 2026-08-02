@@ -48,7 +48,7 @@ def extract_concerts(soup):
             if concert is not None:
                 concerts.append(concert)
         except Exception as e:
-            log_message('Error extracting concert info', event='crawler_item_failed', level=30, error_type=type(e).__name__, error_message=str(e))
+            log_message('Error extracting concert info', event='crawler_item_failed', level='warning', error_type=type(e).__name__, error_message=str(e))
     return concerts
 
 

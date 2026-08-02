@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pythonjsonlogger.json import JsonFormatter
 
@@ -62,13 +62,13 @@ def log_message(
     message: object,
     *,
     event: str = "crawler_message",
-    level: int = logging.DEBUG,
+    level: Literal["debug", "info", "warning", "error", "critical"] = "debug",
     **fields: Any,
 ) -> None:
     """Emit a bounded structured event from a crawler-specific code path."""
 
     logging.getLogger("crawlers").log(
-        level,
+        logging.getLevelNamesMapping()[level.upper()],
         str(message)[:2000],
         extra={"event": event, **fields},
     )

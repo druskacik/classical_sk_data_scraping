@@ -163,7 +163,7 @@ class MhfljCrawler(BaseCrawler):
                 try:
                     details[url] = extract_detail(session, url)
                 except requests.RequestException as exc:
-                    log_message('Failed to scrape concert detail', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
+                    log_message('Failed to scrape concert detail', event='crawler_item_failed', level='warning', url=url, error_type=type(exc).__name__, error_message=str(exc))
                     details[url] = {}
 
             for field, value in details[url].items():

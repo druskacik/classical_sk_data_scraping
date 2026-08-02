@@ -214,7 +214,7 @@ def get_concerts():
         try:
             concert = parse_event(session, event)
         except requests.RequestException as exc:
-            log_message('Failed to scrape event', event='crawler_item_failed', level=30, url=event.get('url'), error_type=type(exc).__name__, error_message=str(exc))
+            log_message('Failed to scrape event', event='crawler_item_failed', level='warning', url=event.get('url'), error_type=type(exc).__name__, error_message=str(exc))
             continue
 
         if concert:

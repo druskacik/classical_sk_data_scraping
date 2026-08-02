@@ -112,7 +112,7 @@ def extract_detail(session, url, fallback):
         response = session.get(url, timeout=30)
         response.raise_for_status()
     except requests.RequestException as exc:
-        log_message('Failed to scrape detail', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
+        log_message('Failed to scrape detail', event='crawler_item_failed', level='warning', url=url, error_type=type(exc).__name__, error_message=str(exc))
         return fallback
 
     soup = BeautifulSoup(response.text, 'html.parser')
@@ -159,7 +159,7 @@ def get_concerts():
             try:
                 details[url] = future.result()
             except Exception as exc:
-                log_message('Failed to process detail', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
+                log_message('Failed to process detail', event='crawler_item_failed', level='warning', url=url, error_type=type(exc).__name__, error_message=str(exc))
 
     for concert in concerts.values():
         concert['description'] = details.get(

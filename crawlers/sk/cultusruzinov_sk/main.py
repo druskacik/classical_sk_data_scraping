@@ -63,10 +63,10 @@ class CultusRuzinovCrawler(BaseCrawler):
         while n_attempts < max_attempts:
             try:
                 slugs = get_event_slugs(access_token)
-                log_message('Concert URLs discovered', event='crawler_urls_discovered', level=20, record_count=len(slugs))
+                log_message('Concert URLs discovered', event='crawler_urls_discovered', level='info', record_count=len(slugs))
                 return [get_event_data(slug, access_token) for slug in slugs]
             except Exception as e:
-                log_message('Crawler attempt failed', event='crawler_attempt_failed', level=30, error_type=type(e).__name__, error_message=str(e))
+                log_message('Crawler attempt failed', event='crawler_attempt_failed', level='warning', error_type=type(e).__name__, error_message=str(e))
                 n_attempts += 1
                 if n_attempts == max_attempts:
                     raise e

@@ -236,7 +236,7 @@ def get_concerts():
         try:
             enriched.append(extract_detail_data(session, concert))
         except requests.RequestException as exc:
-            log_message('Failed to scrape event', event='crawler_item_failed', level=30, url=concert['url'], error_type=type(exc).__name__, error_message=str(exc))
+            log_message('Failed to scrape event', event='crawler_item_failed', level='warning', url=concert['url'], error_type=type(exc).__name__, error_message=str(exc))
             enriched.append(concert)
     return enriched
 

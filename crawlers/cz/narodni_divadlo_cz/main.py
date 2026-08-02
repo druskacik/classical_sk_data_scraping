@@ -110,7 +110,7 @@ def extract_production_detail(session, production):
         data = get_page_data(session, url)
         detail = data['props']['pageProps']['productionData']['production']
     except (KeyError, TypeError, ValueError, requests.RequestException) as exc:
-        log_message('Failed to scrape production detail', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
+        log_message('Failed to scrape production detail', event='crawler_item_failed', level='warning', url=url, error_type=type(exc).__name__, error_message=str(exc))
         return {
             'url': url,
             'description': clean_text(production.get('title')),

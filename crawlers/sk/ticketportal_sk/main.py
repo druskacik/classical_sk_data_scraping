@@ -166,7 +166,7 @@ class TicketportalCrawler(BaseCrawler):
                     concert_data.append(concert_info)
                 except Exception as e:
                     log_message(
-                        'Error processing event block', event='crawler_item_failed', level=30,
+                        'Error processing event block', event='crawler_item_failed', level='warning',
                         url=url, error_type=type(e).__name__, error_message=str(e),
                     )
 

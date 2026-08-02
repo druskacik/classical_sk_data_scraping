@@ -167,13 +167,13 @@ def get_concerts():
         try:
             detail = extract_detail(session, url)
         except requests.RequestException as exc:
-            log_message('Failed to scrape detail', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
+            log_message('Failed to scrape detail', event='crawler_item_failed', level='warning', url=url, error_type=type(exc).__name__, error_message=str(exc))
             detail = {}
 
         title = detail.get('title') or card_title
         concert_date = detail.get('date') or parse_date(card_date)
         if not title or not concert_date:
-            log_message('Skipping event with missing title or date', event='crawler_item_skipped', level=30, url=url)
+            log_message('Skipping event with missing title or date', event='crawler_item_skipped', level='warning', url=url)
             continue
 
         venue = detail.get('venue') or card_venue

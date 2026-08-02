@@ -182,12 +182,12 @@ class JfoCrawler(BaseCrawler):
             try:
                 concert = extract_concert(session, url)
             except requests.RequestException as exc:
-                log_message('Failed to scrape event', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
+                log_message('Failed to scrape event', event='crawler_item_failed', level='warning', url=url, error_type=type(exc).__name__, error_message=str(exc))
                 continue
             if concert:
                 concerts.append(concert)
             else:
-                log_message('Skipping event with missing title or date', event='crawler_item_skipped', level=30, url=url)
+                log_message('Skipping event with missing title or date', event='crawler_item_skipped', level='warning', url=url)
 
         return concerts
 

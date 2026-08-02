@@ -129,7 +129,7 @@ class PredpredajCrawler(BaseCrawler):
                 try:
                     concert_data.append(future.result())
                 except Exception as exc:
-                    log_message('Error extracting Predpredaj event', event='crawler_item_failed', level=30, error_type=type(exc).__name__, error_message=str(exc))
+                    log_message('Error extracting Predpredaj event', event='crawler_item_failed', level='warning', error_type=type(exc).__name__, error_message=str(exc))
         return [item for sublist in concert_data for item in sublist]
 
     def transform(self, df):

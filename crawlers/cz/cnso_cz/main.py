@@ -260,7 +260,7 @@ def get_concerts():
         try:
             detail = extract_detail(session, url)
         except requests.RequestException as exc:
-            log_message('Failed to scrape event', event='crawler_item_failed', level=30, url=url, error_type=type(exc).__name__, error_message=str(exc))
+            log_message('Failed to scrape event', event='crawler_item_failed', level='warning', url=url, error_type=type(exc).__name__, error_message=str(exc))
             detail = {}
 
         concert = {**fallback, **{key: value for key, value in detail.items() if value}}
