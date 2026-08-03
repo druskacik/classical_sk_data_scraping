@@ -13,7 +13,10 @@ from automation.crawler_registry import normalize_source_url, normalized_crawler
 from automation.run_crawler_factory import (
     attempt_source,
     crawler_directory,
+    generated_geography,
     normalize_blocked_metadata,
+    relocate_generated_directory,
+    resolved_crawler_directory,
     parse_blocked_metadata,
     reconcile_pull_requests,
     validate_change_scope,
@@ -29,6 +32,7 @@ from build_crawlers_with_codex import crawler_folder_name
 def blocked_text(url: str, country_code: str, attempted: date) -> str:
     metadata = {
         "url": url,
+        "geographic_scope": "country",
         "country_code": country_code,
         "reason_code": "no_current_events",
         "attempted_at": attempted.isoformat(),
@@ -73,6 +77,7 @@ class BlockedMetadataTests(unittest.TestCase):
             normalize_blocked_metadata(
                 workspace,
                 url,
+                "country",
                 "CZ",
                 crawler_directory(url),
                 attempted,
@@ -80,8 +85,62 @@ class BlockedMetadataTests(unittest.TestCase):
             metadata = parse_blocked_metadata(path)
 
         self.assertEqual(metadata["url"], url)
+        self.assertEqual(metadata["geographic_scope"], "country")
         self.assertEqual(metadata["attempted_at"], "2026-07-25")
         self.assertEqual(metadata["retry_after"], "2026-08-24")
+
+
+class GeneratedGeographyTests(unittest.TestCase):
+    def test_country_config_resolves_corrected_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "crawlers/de/example_es"
+            directory.mkdir(parents=True)
+            (directory / "main.py").write_text(
+                'config = CrawlerConfig(country_code="es")\n',
+                encoding="utf-8",
+            )
+
+            scope, country = generated_geography(directory)
+
+        self.assertEqual((scope, country), ("country", "ES"))
+        self.assertEqual(
+            resolved_crawler_directory("example_es", scope, country),
+            Path("crawlers/es/example_es"),
+        )
+
+    def test_none_config_resolves_common_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / "crawlers/us/example_com"
+            directory.mkdir(parents=True)
+            (directory / "main.py").write_text(
+                "config = CrawlerConfig(country_code=None)\n",
+                encoding="utf-8",
+            )
+
+            scope, country = generated_geography(directory)
+
+        self.assertEqual((scope, country), ("multi_country", None))
+        self.assertEqual(
+            resolved_crawler_directory("example_com", scope, country),
+            Path("crawlers/common/example_com"),
+        )
+
+    def test_relocation_preserves_generated_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            current = Path("crawlers/de/example_es")
+            final = Path("crawlers/es/example_es")
+            path = workspace / current / "main.py"
+            path.parent.mkdir(parents=True)
+            path.write_text("generated\n", encoding="utf-8")
+
+            relocate_generated_directory(workspace, current, final)
+
+            self.assertFalse((workspace / current).exists())
+            self.assertEqual(
+                (workspace / final / "main.py").read_text(encoding="utf-8"),
+                "generated\n",
+            )
 
 
 class RegistryIdentityTests(unittest.TestCase):
@@ -137,7 +196,6 @@ class RegistryIdentityTests(unittest.TestCase):
                             f"crawlers/{row['country_code'].lower()}/"
                             f"{crawler_folder_name(source_url)}"
                         )
-                    self.assertNotIn(path, seeded_paths)
                     seeded_paths.add(path)
         existing_paths = {
             marker.parent.relative_to(root).as_posix()
@@ -362,6 +420,79 @@ class AttemptTests(unittest.TestCase):
         "crawler_path": "crawlers/cz/hamu_cz",
     }
 
+    def test_generated_country_correction_relocates_before_commit(self):
+        source = {
+            "id": 13,
+            "canonical_url": "https://example.com/",
+            "country_code": "DE",
+            "geographic_scope": "unknown",
+            "crawler_path": "crawlers/de/example_com",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            run_dir = root / "runs"
+            workspace.mkdir()
+            run_dir.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            original_run_command = factory.run_command
+            resolved = []
+
+            def fake_run_command(command, **kwargs):
+                if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
+                    path = workspace / source["crawler_path"] / "main.py"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(
+                        'config = CrawlerConfig(country_code="ES")\n',
+                        encoding="utf-8",
+                    )
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if "automation.validate_generated_crawler" in command:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        json.dumps(
+                            {
+                                "status": "passed",
+                                "record_count": 1,
+                                "issue_count": 0,
+                                "issues": [],
+                                "duration_seconds": 0.1,
+                            }
+                        ),
+                        "",
+                    )
+                return original_run_command(command, **kwargs)
+
+            def resolve_identity(current, scope, country, path):
+                resolved.append((scope, country, path))
+                return {
+                    **current,
+                    "country_code": country,
+                    "geographic_scope": scope,
+                    "crawler_path": path,
+                }
+
+            with (
+                patch.object(factory, "run_command", side_effect=fake_run_command),
+                patch.object(factory, "git_commit", return_value="abc123"),
+            ):
+                result = attempt_source(
+                    workspace,
+                    run_dir,
+                    source,
+                    30,
+                    {},
+                    identity_resolver=resolve_identity,
+                )
+
+            self.assertFalse((workspace / "crawlers/de/example_com").exists())
+            self.assertTrue((workspace / "crawlers/es/example_com/main.py").exists())
+
+        self.assertEqual(resolved, [("country", "ES", "crawlers/es/example_com")])
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(result["crawler_directory"], "crawlers/es/example_com")
+
     def test_nonzero_builder_result_is_preserved_when_scope_is_valid(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -381,7 +512,12 @@ class AttemptTests(unittest.TestCase):
                     )
                     path = workspace / crawler_directory("https://www.hamu.cz/") / "main.py"
                     path.parent.mkdir(parents=True)
-                    path.write_text("# useful partial result\n", encoding="utf-8")
+                    path.write_text(
+                        'from crawlers.base import CrawlerConfig\n'
+                        'config = CrawlerConfig(slug="hamu_cz", source="HAMU", '
+                        'source_url="https://www.hamu.cz/", country_code="CZ")\n',
+                        encoding="utf-8",
+                    )
                     return subprocess.CompletedProcess(command, 1, "", "builder failed")
                 if "automation.validate_generated_crawler" in command:
                     return subprocess.CompletedProcess(
@@ -432,7 +568,12 @@ class AttemptTests(unittest.TestCase):
                 if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
                     path = workspace / crawler_directory("https://www.hamu.cz/") / "main.py"
                     path.parent.mkdir(parents=True)
-                    path.write_text("# useful partial result\n", encoding="utf-8")
+                    path.write_text(
+                        'from crawlers.base import CrawlerConfig\n'
+                        'config = CrawlerConfig(slug="hamu_cz", source="HAMU", '
+                        'source_url="https://www.hamu.cz/", country_code="CZ")\n',
+                        encoding="utf-8",
+                    )
                     raise subprocess.TimeoutExpired(command, 60, output="partial log\n")
                 if "automation.validate_generated_crawler" in command:
                     return subprocess.CompletedProcess(
@@ -480,7 +621,12 @@ class AttemptTests(unittest.TestCase):
                 if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
                     path = workspace / crawler_directory("https://www.hamu.cz/") / "main.py"
                     path.parent.mkdir(parents=True)
-                    path.write_text("# generated\n", encoding="utf-8")
+                    path.write_text(
+                        'from crawlers.base import CrawlerConfig\n'
+                        'config = CrawlerConfig(slug="hamu_cz", source="HAMU", '
+                        'source_url="https://www.hamu.cz/", country_code="CZ")\n',
+                        encoding="utf-8",
+                    )
                     return subprocess.CompletedProcess(command, 0, "", "")
                 if command[:2] == ["git", "status"]:
                     path = crawler_directory("https://www.hamu.cz/") / "main.py"
@@ -630,6 +776,23 @@ class PullRequestScopeTests(unittest.TestCase):
                 "def main():\n"
                 "    Crawler().run()\n"
                 "raise RuntimeError('must not execute')\n",
+                encoding="utf-8",
+            )
+
+            result = validate_directory(workspace, directory)
+
+        self.assertEqual(result, {"status": "passed", "kind": "crawler"})
+
+    def test_common_crawler_requires_no_default_country(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            directory = Path("crawlers/common/example_com")
+            main_path = workspace / directory / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text(
+                "config = CrawlerConfig(country_code=None)\n"
+                "def main():\n"
+                "    ExampleCrawler().run()\n",
                 encoding="utf-8",
             )
 

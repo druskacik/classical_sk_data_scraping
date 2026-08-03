@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import fcntl
 import json
 import logging
@@ -16,6 +17,7 @@ import urllib.request
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Callable
 
 from dotenv import load_dotenv
 from observability import configure_logging
@@ -80,6 +82,19 @@ def crawler_directory(url: str, country_code: str | None = None) -> Path:
     return Path("crawlers") / country.lower() / crawler_folder_name(url)
 
 
+def pending_crawler_directory(url: str) -> Path:
+    return Path("crawlers") / "_pending" / crawler_folder_name(url)
+
+
+def resolved_crawler_directory(
+    slug: str,
+    geographic_scope: str,
+    country_code: str | None,
+) -> Path:
+    parent = "common" if geographic_scope == "multi_country" else str(country_code).lower()
+    return Path("crawlers") / parent / slug
+
+
 def source_directory(source: dict) -> Path:
     if not source.get("crawler_path"):
         raise ValueError(f"Crawler source {source['id']} has no assigned crawler_path")
@@ -98,6 +113,59 @@ def parse_blocked_metadata(path: Path) -> dict:
     if not required.issubset(metadata):
         raise ValueError("BLOCKED.md metadata is incomplete")
     return metadata
+
+
+def generated_geography(crawler_path: Path) -> tuple[str, str | None]:
+    main_path = crawler_path / "main.py"
+    if main_path.exists():
+        tree = ast.parse(main_path.read_text(encoding="utf-8"), str(main_path))
+        values = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = (
+                node.func.id
+                if isinstance(node.func, ast.Name)
+                else node.func.attr if isinstance(node.func, ast.Attribute) else None
+            )
+            if name != "CrawlerConfig":
+                continue
+            for keyword in node.keywords:
+                if keyword.arg == "country_code":
+                    values.append(ast.literal_eval(keyword.value))
+        if len(values) != 1:
+            raise ValueError("generated crawler must declare country_code exactly once")
+        country_code = values[0]
+        if country_code is None:
+            return "multi_country", None
+        if not isinstance(country_code, str) or not re.fullmatch(r"[A-Za-z]{2}", country_code):
+            raise ValueError("generated crawler country_code must be None or an ISO alpha-2 code")
+        return "country", country_code.upper()
+
+    metadata = parse_blocked_metadata(crawler_path / "BLOCKED.md")
+    scope = metadata.get("geographic_scope")
+    country_code = metadata.get("country_code")
+    if scope == "multi_country" and country_code is None:
+        return scope, None
+    if scope == "country" and isinstance(country_code, str) and re.fullmatch(
+        r"[A-Za-z]{2}", country_code
+    ):
+        return scope, country_code.upper()
+    raise ValueError("blocked crawler must declare a resolved geographic scope")
+
+
+def relocate_generated_directory(
+    workspace: Path,
+    current: Path,
+    final: Path,
+) -> None:
+    if current == final:
+        return
+    target = workspace / final
+    if target.exists():
+        raise FileExistsError(f"resolved crawler directory already exists: {final}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(workspace / current), str(target))
 
 
 def resolve_source_url(url: str, timeout_seconds: int = 20) -> str:
@@ -145,11 +213,22 @@ def changed_paths(workspace: Path) -> list[str]:
     return paths
 
 
-def validate_change_scope(workspace: Path, expected_directory: Path) -> None:
+def validate_change_scope(
+    workspace: Path,
+    expected_directory: Path,
+    previous_directory: Path | None = None,
+) -> None:
     allowed = {
         str(expected_directory / "main.py"),
         str(expected_directory / "BLOCKED.md"),
     }
+    if previous_directory and previous_directory != expected_directory:
+        allowed.update(
+            {
+                str(previous_directory / "main.py"),
+                str(previous_directory / "BLOCKED.md"),
+            }
+        )
     paths = set(changed_paths(workspace))
     unexpected = sorted(paths - allowed)
     if not paths:
@@ -165,7 +244,8 @@ def validate_change_scope(workspace: Path, expected_directory: Path) -> None:
 def normalize_blocked_metadata(
     workspace: Path,
     url: str,
-    country_code: str,
+    geographic_scope: str,
+    country_code: str | None,
     crawler_path: Path,
     attempted: date,
 ) -> None:
@@ -185,7 +265,8 @@ def normalize_blocked_metadata(
         reason_code = "implementation_failed"
     metadata = {
         "url": url,
-        "country_code": country_code.upper(),
+        "geographic_scope": geographic_scope,
+        "country_code": country_code.upper() if country_code else None,
         "reason_code": reason_code,
         "attempted_at": attempted.isoformat(),
         "retry_after": (attempted + timedelta(days=30)).isoformat(),
@@ -303,6 +384,7 @@ def attempt_source(
     child_env: dict[str, str],
     model: str = MODEL,
     validation_timeout_minutes: int = DEFAULT_VALIDATION_TIMEOUT_MINUTES,
+    identity_resolver: Callable[[dict, str, str | None, str], dict] | None = None,
 ) -> dict:
     started = time.monotonic()
     url = source["canonical_url"]
@@ -314,6 +396,8 @@ def attempt_source(
         "url": url,
         "resolved_url": url,
         "crawler_directory": str(directory),
+        "geographic_scope": source.get("geographic_scope", "unknown"),
+        "country_code": source.get("country_code"),
         "status": "generation_failed",
         "commit": None,
         "generation_warning": None,
@@ -332,8 +416,6 @@ def attempt_source(
         model,
         "--url",
         url,
-        "--country-code",
-        source["country_code"],
         "--crawler-directory",
         str(directory),
         "--retry-blocked",
@@ -342,6 +424,11 @@ def attempt_source(
         "--results",
         str(builder_report),
     ]
+    if source.get("country_code"):
+        command[command.index("--crawler-directory"):command.index("--crawler-directory")] = [
+            "--country-code",
+            source["country_code"],
+        ]
     try:
         try:
             generation = run_command(
@@ -373,11 +460,35 @@ def attempt_source(
                 result["generation_warning"] = (
                     f"builder exited with status {generation.returncode}"
                 )
-        validate_change_scope(workspace, directory)
+        initial_directory = directory
+        validate_change_scope(workspace, initial_directory)
+        geographic_scope, country_code = generated_geography(workspace / directory)
+        final_directory = resolved_crawler_directory(
+            directory.name,
+            geographic_scope,
+            country_code,
+        )
+        relocate_generated_directory(workspace, directory, final_directory)
+        directory = final_directory
+        result["crawler_directory"] = str(directory)
+        result["geographic_scope"] = geographic_scope
+        result["country_code"] = country_code
+        validate_change_scope(workspace, directory, initial_directory)
+        if identity_resolver:
+            source = identity_resolver(
+                source,
+                geographic_scope,
+                country_code,
+                str(directory),
+            )
+            if source.get("status") == "duplicate":
+                result["status"] = "duplicate"
+                return result
         normalize_blocked_metadata(
             workspace,
             url,
-            source["country_code"],
+            geographic_scope,
+            country_code,
             directory,
             datetime.now(UTC).date(),
         )
@@ -634,12 +745,14 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
             attempt_id = registry.start_attempt(source, run_id)
             resolved_url = resolve_source_url(source["canonical_url"])
             assigned_path = source.get("crawler_path") or str(
-                crawler_directory(resolved_url, source["country_code"])
+                pending_crawler_directory(resolved_url)
             )
             source = registry.assign_resolved_identity(
                 source["id"],
                 resolved_url,
                 assigned_path,
+                country_code=source.get("country_code"),
+                geographic_scope=source.get("geographic_scope", "unknown"),
             )
             if source["status"] == "duplicate":
                 result = {
@@ -671,6 +784,15 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
                 child_env,
                 args.model,
                 args.validation_timeout_minutes,
+                identity_resolver=lambda current, scope, country, path: (
+                    registry.assign_resolved_identity(
+                        current["id"],
+                        resolved_url,
+                        path,
+                        country_code=country,
+                        geographic_scope=scope,
+                    )
+                ),
             )
             result["resolved_url"] = resolved_url
             results.append(result)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -12,6 +13,17 @@ from psycopg2.extras import Json, RealDictCursor
 
 
 DUE_STATUSES = ("pending", "retry_wait", "blocked")
+GEOGRAPHIC_SCOPES = {"unknown", "country", "multi_country"}
+PROTECTED_IDENTITY_STATUSES = {
+    "processing", "pr_open", "active", "blocked", "duplicate", "disabled"
+}
+
+
+def identity_is_mutable(source: dict) -> bool:
+    return (
+        source.get("geographic_scope", "unknown") == "unknown"
+        and source["status"] not in PROTECTED_IDENTITY_STATUSES
+    )
 
 
 def get_connection():
@@ -49,6 +61,31 @@ def normalized_crawler_path(path: str | Path) -> str:
     return value.as_posix()
 
 
+def normalized_geographic_identity(
+    country_code: str | None,
+    geographic_scope: str,
+    crawler_path: str | None,
+) -> tuple[str | None, str, str | None]:
+    scope = geographic_scope.strip().lower()
+    if scope not in GEOGRAPHIC_SCOPES:
+        raise ValueError("geographic_scope must be unknown, country, or multi_country")
+    country = country_code.strip().upper() if country_code else None
+    if country is not None and not re.fullmatch(r"[A-Z]{2}", country):
+        raise ValueError("country_code must be a two-letter ISO code or null")
+    path = normalized_crawler_path(crawler_path) if crawler_path else None
+    if scope == "country":
+        if country is None or path is None:
+            raise ValueError("country scope requires country_code and crawler_path")
+        if Path(path).parts[1] != country.lower():
+            raise ValueError("country crawler_path must match country_code")
+    elif scope == "multi_country":
+        if country is not None or path is None or Path(path).parts[1] != "common":
+            raise ValueError(
+                "multi_country scope requires a null country and crawlers/common/<slug>"
+            )
+    return country, scope, path
+
+
 class CrawlerRegistry:
     def __init__(self, connection=None) -> None:
         self.connection = connection or get_connection()
@@ -82,21 +119,21 @@ class CrawlerRegistry:
     def ingest_source(
         self,
         url: str,
-        country_code: str,
+        country_code: str | None,
         *,
         canonical_url: str | None = None,
         crawler_path: str | None = None,
         priority: int = 0,
         discovered_by: str = "manual",
         metadata: dict | None = None,
+        geographic_scope: str = "unknown",
         commit: bool = True,
     ) -> dict:
         normalized = normalize_source_url(url)
-        country = country_code.strip().upper()
-        if len(country) != 2 or not country.isalpha():
-            raise ValueError("country_code must be a two-letter ISO code")
         preferred = canonical_url or url
-        path = normalized_crawler_path(crawler_path) if crawler_path else None
+        country, scope, path = normalized_geographic_identity(
+            country_code, geographic_scope, crawler_path
+        )
         try:
             with self.cursor() as cursor:
                 cursor.execute(
@@ -118,6 +155,19 @@ class CrawlerRegistry:
                         """,
                         (normalized,),
                     )
+                    if identity_is_mutable(existing):
+                        cursor.execute(
+                            """
+                            UPDATE crawler_source
+                            SET country_code = %s, geographic_scope = %s,
+                                canonical_url = %s, crawler_path = %s,
+                                priority = GREATEST(priority, %s), updated_at = now()
+                            WHERE id = %s
+                            RETURNING *
+                            """,
+                            (country, scope, preferred, path, priority, existing["id"]),
+                        )
+                        existing = cursor.fetchone()
                     if commit:
                         self.connection.commit()
                     return dict(existing)
@@ -149,12 +199,13 @@ class CrawlerRegistry:
                 cursor.execute(
                     """
                     INSERT INTO crawler_source (
-                        country_code, canonical_url, crawler_path, status, priority
+                        country_code, geographic_scope, canonical_url,
+                        crawler_path, status, priority
                     )
-                    VALUES (%s, %s, %s, 'pending', %s)
+                    VALUES (%s, %s, %s, %s, 'pending', %s)
                     RETURNING *
                     """,
-                    (country, preferred, path, priority),
+                    (country, scope, preferred, path, priority),
                 )
                 source = dict(cursor.fetchone())
                 cursor.execute(
@@ -321,8 +372,20 @@ class CrawlerRegistry:
         source_id: int,
         resolved_url: str,
         crawler_path: str,
+        *,
+        country_code: str | None = None,
+        geographic_scope: str | None = None,
     ) -> dict:
         path = normalized_crawler_path(crawler_path)
+        if geographic_scope is None:
+            geographic_scope = (
+                "multi_country" if Path(path).parts[1] == "common" else "country"
+            )
+        if geographic_scope == "country" and country_code is None:
+            country_code = Path(path).parts[1].upper()
+        country, scope, path = normalized_geographic_identity(
+            country_code, geographic_scope, path
+        )
         try:
             with self.cursor() as cursor:
                 alias_owner = self._record_alias(
@@ -362,11 +425,12 @@ class CrawlerRegistry:
                     cursor.execute(
                         """
                         UPDATE crawler_source
-                        SET canonical_url = %s, crawler_path = %s, updated_at = now()
+                        SET canonical_url = %s, country_code = %s,
+                            geographic_scope = %s, crawler_path = %s, updated_at = now()
                         WHERE id = %s
                         RETURNING *
                         """,
-                        (resolved_url, path, source_id),
+                        (resolved_url, country, scope, path, source_id),
                     )
                 source = dict(cursor.fetchone())
             self.connection.commit()

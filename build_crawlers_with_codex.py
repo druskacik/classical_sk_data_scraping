@@ -64,11 +64,15 @@ def render_prompt(
     crawler_directory: Path | None = None,
 ) -> str:
     template = ((workspace or Path.cwd()) / PROMPT_PATH).read_text(encoding="utf-8")
+    normalized_country = country_code.upper() if country_code else None
     return pystache.render(
         template,
         {
             "url": url,
-            "country_code": country_code or country_code_for_url(url),
+            "country_code": normalized_country or "unknown",
+            "country_code_literal": repr(normalized_country),
+            "country_code_json": json.dumps(normalized_country),
+            "geographic_scope_hint": "country" if normalized_country else "unknown",
             "crawler_directory": str(crawler_directory) if crawler_directory else "",
         },
     )
@@ -93,11 +97,17 @@ def build_crawler(
     model: str = MODEL,
 ) -> dict:
     workspace = (workspace or Path.cwd()).resolve()
-    country = (country_code or country_code_for_url(url)).upper()
+    country = (
+        country_code.upper()
+        if country_code
+        else (country_code_for_url(url) if crawler_directory is None else None)
+    )
     relative_directory = (
         crawler_directory
         if crawler_directory is not None
-        else CRAWLERS_DIR / country.lower() / crawler_folder_name(url)
+        else CRAWLERS_DIR
+        / (country.lower() if country else "_pending")
+        / crawler_folder_name(url)
     )
     if relative_directory.is_absolute() or ".." in relative_directory.parts:
         raise ValueError("crawler_directory must be repository-relative")

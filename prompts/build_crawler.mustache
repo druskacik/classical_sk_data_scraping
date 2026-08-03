@@ -8,7 +8,12 @@ What should the crawler do:
 
 Before implementing, inspect `crawlers/base.py` and at least one current
 `crawlers/<country_code>/<site>/main.py` example. Use the repository's current
-interfaces exactly; do not rely on remembered crawler APIs.
+interfaces exactly; do not rely on remembered crawler APIs. The assigned country
+is a hint, not a constraint: if the source is clearly based in a different
+country, use that ISO code in `CrawlerConfig`. Use `country_code=None` only for a
+genuinely multi-country source and then emit an ISO country code on every record.
+A home-country organization does not become multi-country merely because it tours.
+If you return `BLOCKED.md`, apply the same resolved geography to its metadata.
 
 To investigate the website, use the Playwright MCP. First, investigate if you can reconstruct some API from the network requests - that would be the easiest, since it usually has the structured data. If you can't find it in network requests, go for HTML parsing.
 
@@ -47,7 +52,7 @@ config = CrawlerConfig(
     slug="site_domain",
     source="Human-readable source name",
     source_url="https://example.com/",
-    country_code="{{ country_code }}",
+    country_code={{ country_code_literal }},
     upload_target="classical",
 )
 ```
@@ -114,7 +119,7 @@ using one of `no_current_events`, `access_blocked`, `no_parseable_source`, or
 the URL, country, attempt date, and retry date before publication:
 
 <!-- crawler-factory-metadata
-{"url":"{{ url }}","country_code":"{{ country_code }}","reason_code":"no_current_events","attempted_at":"YYYY-MM-DD","retry_after":"YYYY-MM-DD"}
+{"url":"{{ url }}","geographic_scope":"{{ geographic_scope_hint }}","country_code":{{ country_code_json }},"reason_code":"no_current_events","attempted_at":"YYYY-MM-DD","retry_after":"YYYY-MM-DD"}
 -->
 
 Build the crawler for the following url: {{ url }}

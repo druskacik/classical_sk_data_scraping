@@ -8,7 +8,7 @@ from pathlib import Path
 
 from agent_utils.search_db import load_environment
 from automation.crawler_registry import CrawlerRegistry
-from build_crawlers_with_codex import country_code_for_url, crawler_folder_name
+from build_crawlers_with_codex import crawler_folder_name
 
 
 REQUIRED_COLUMNS = {"url"}
@@ -55,12 +55,28 @@ def import_seed(path: Path, repository_root: Path, registry: CrawlerRegistry) ->
         for row in rows:
             url = row["url"].strip()
             canonical_url = (row.get("canonical_url") or "").strip() or None
-            country = (row.get("country_code") or "").strip().upper()
-            if not country:
-                country = country_code_for_url(canonical_url or url)
+            country = (row.get("country_code") or "").strip().upper() or None
             crawler_path = (row.get("crawler_path") or "").strip()
-            if not crawler_path:
+            scope_hint = (row.get("scope_hint") or "").strip().lower() or "unknown"
+            if not crawler_path and scope_hint == "multi_country":
+                crawler_path = f"crawlers/common/{crawler_folder_name(canonical_url or url)}"
+            elif not crawler_path and country:
                 crawler_path = expected_crawler_path(canonical_url or url, country)
+            crawler_path = crawler_path or None
+            directory = repository_root / crawler_path if crawler_path else None
+            has_main = bool(directory and (directory / "main.py").exists())
+            has_blocked = bool(directory and (directory / "BLOCKED.md").exists())
+            geographic_scope = "unknown"
+            if (has_main or has_blocked) and scope_hint == "unknown":
+                scope_hint = (
+                    "multi_country"
+                    if crawler_path and crawler_path.split("/")[1] == "common"
+                    else "country"
+                )
+                if scope_hint == "multi_country":
+                    country = None
+            if has_main or has_blocked:
+                geographic_scope = scope_hint
             source = registry.ingest_source(
                 url,
                 country,
@@ -69,15 +85,17 @@ def import_seed(path: Path, repository_root: Path, registry: CrawlerRegistry) ->
                 priority=int((row.get("priority") or "0").strip()),
                 discovered_by=f"seed:{path.name}",
                 metadata={"notes": (row.get("notes") or "").strip()},
+                geographic_scope=geographic_scope,
                 commit=False,
             )
-            directory = repository_root / crawler_path
-            if (directory / "main.py").exists():
+            effective_path = source.get("crawler_path")
+            effective_directory = repository_root / effective_path if effective_path else None
+            if effective_directory and (effective_directory / "main.py").exists():
                 status = "active"
                 next_attempt_at = None
-            elif (directory / "BLOCKED.md").exists():
+            elif effective_directory and (effective_directory / "BLOCKED.md").exists():
                 status = "blocked"
-                next_attempt_at = blocked_retry_after(directory / "BLOCKED.md")
+                next_attempt_at = blocked_retry_after(effective_directory / "BLOCKED.md")
             else:
                 status = "pending"
                 next_attempt_at = None
@@ -85,19 +103,20 @@ def import_seed(path: Path, repository_root: Path, registry: CrawlerRegistry) ->
                 cursor.execute(
                     """
                     UPDATE crawler_source
-                    SET canonical_url = %s, crawler_path = %s, status = %s,
-                        next_attempt_at = %s, updated_at = now()
+                    SET status = %s, next_attempt_at = %s, updated_at = now()
                     WHERE id = %s
+                      AND status NOT IN (
+                          'processing', 'pr_open', 'active', 'blocked',
+                          'duplicate', 'disabled'
+                      )
+                    RETURNING status
                     """,
-                    (
-                        canonical_url or url,
-                        crawler_path,
-                        status,
-                        next_attempt_at,
-                        source["id"],
-                    ),
+                    (status, next_attempt_at, source["id"]),
                 )
-            counts[status] += 1
+                updated = cursor.fetchone()
+            effective_status = updated["status"] if updated else source["status"]
+            if effective_status in counts:
+                counts[effective_status] += 1
         with registry.cursor() as cursor:
             cursor.execute(
                 """

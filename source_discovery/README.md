@@ -57,3 +57,6 @@ uv run python -m source_discovery.classicalconcertmap \
   --seed-output seeds/crawler_sources/0004_classicalconcertmap_discovered_sources.csv
 ```
 
+Compilation automatically applies the reviewed country and multi-country
+corrections in `source_discovery/classicalconcertmap_overrides.csv`. Add verified
+corrections there instead of editing the generated seed directly.

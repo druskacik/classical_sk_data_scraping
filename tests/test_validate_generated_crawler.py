@@ -115,6 +115,37 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(records[0]["country_code"], "CZ")
         crawler.upload.assert_not_called()
 
+    def test_config_without_default_country_accepts_and_normalizes_record_countries(self):
+        class CommonCrawler(BaseCrawler):
+            config = CrawlerConfig(
+                slug="common_test",
+                source="Common",
+                source_url="https://example.test/",
+                country_code=None,
+            )
+
+        records = CommonCrawler().prepare_records([valid_record(country_code="cz")])
+
+        self.assertEqual(records[0]["country_code"], "CZ")
+
+    def test_config_without_default_country_requires_country_column(self):
+        class CommonCrawler(BaseCrawler):
+            config = CrawlerConfig(
+                slug="common_test",
+                source="Common",
+                source_url="https://example.test/",
+                country_code=None,
+            )
+
+        record = valid_record()
+        del record["country_code"]
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "country_code is required on every record",
+        ):
+            CommonCrawler().prepare_records([record])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,7 +18,16 @@ ORGS_JSON_URL = "https://classicalconcertmap.com/data/orgs.json"
 CONCERTS_API_URL = "https://classicalconcertmap.com/api/concerts"
 DEFAULT_USER_AGENT = "classical-bot-source-discovery/1.0"
 
-SEED_FIELDS = ["url", "country_code", "canonical_url", "crawler_path", "priority", "notes"]
+SEED_FIELDS = [
+    "url",
+    "country_code",
+    "scope_hint",
+    "canonical_url",
+    "crawler_path",
+    "priority",
+    "notes",
+]
+DEFAULT_OVERRIDES_PATH = Path(__file__).with_name("classicalconcertmap_overrides.csv")
 
 
 @dataclass(frozen=True)
@@ -164,9 +173,43 @@ def write_discovery_csv(sources: list[DiscoveredOrgSource], output_path: Path) -
     logger.info(f"Saved {len(sources)} discovered org sources to {output_path}")
 
 
-def compile_seed_csv(discovery_path: Path, seed_output_path: Path) -> None:
+def load_overrides(overrides_path: Path) -> dict[str, dict[str, str]]:
+    if not overrides_path.exists():
+        return {}
+
+    with overrides_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+
+    overrides: dict[str, dict[str, str]] = {}
+    for row in rows:
+        url = website_home_url(row.get("url", ""))
+        country_code = row.get("country_code", "").strip().upper()
+        scope_hint = row.get("scope_hint", "").strip().lower() or "country"
+        if scope_hint not in {"country", "multi_country"}:
+            raise ValueError(f"Invalid scope_hint {scope_hint!r} for {url}")
+        if scope_hint == "country" and len(country_code) != 2:
+            raise ValueError(f"Country override for {url} requires a two-letter country_code")
+        if scope_hint == "multi_country" and country_code:
+            raise ValueError(f"Multi-country override for {url} must not set country_code")
+        if url in overrides:
+            raise ValueError(f"Duplicate ClassicalConcertMap override for {url}")
+        overrides[url] = {
+            "country_code": country_code,
+            "scope_hint": scope_hint,
+            "notes": row.get("notes", "").strip(),
+        }
+    return overrides
+
+
+def compile_seed_csv(
+    discovery_path: Path,
+    seed_output_path: Path,
+    overrides_path: Path = DEFAULT_OVERRIDES_PATH,
+) -> None:
     with discovery_path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
+
+    overrides = load_overrides(overrides_path)
 
     # Deduplicate by canonical normalized homepage URL
     seen_urls: set[str] = set()
@@ -187,22 +230,42 @@ def compile_seed_csv(discovery_path: Path, seed_output_path: Path) -> None:
             continue
         seen_urls.add(norm_url)
 
+        override = overrides.get(norm_url)
+        scope_hint = ""
+        override_note = ""
+        if override:
+            country_code = override["country_code"]
+            scope_hint = override["scope_hint"]
+            override_note = override["notes"]
+
         c_slug = crawler_slug(norm_url)
-        c_path = f"crawlers/{country_code.lower()}/{c_slug}"
+        c_path = (
+            f"crawlers/common/{c_slug}"
+            if scope_hint == "multi_country"
+            else f"crawlers/{country_code.lower()}/{c_slug}"
+        )
 
         name = row.get("name", "")
         org_id = row.get("org_id", "")
         event_url = row.get("sample_event_url", "")
         notes = f"Discovered via ClassicalConcertMap org {org_id} ({name}); evidence={event_url}"
+        if override_note:
+            notes = f"{notes}; reviewed_override={override_note}"
 
         seed_rows.append({
             "url": norm_url,
             "country_code": country_code,
+            "scope_hint": scope_hint,
             "canonical_url": "",
             "crawler_path": c_path,
             "priority": "0",
             "notes": notes,
         })
+
+    missing_overrides = set(overrides) - seen_urls
+    if missing_overrides:
+        missing = ", ".join(sorted(missing_overrides))
+        raise ValueError(f"Overrides do not match discovery rows: {missing}")
 
     # Sort deterministically by country_code, then url
     seed_rows.sort(key=lambda r: (r["country_code"], r["url"]))
@@ -219,6 +282,12 @@ def compile_seed_csv(discovery_path: Path, seed_output_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Discover classical concert sources from classicalconcertmap.com"
+    )
+    parser.add_argument(
+        "--overrides",
+        type=Path,
+        default=DEFAULT_OVERRIDES_PATH,
+        help="Reviewed country and scope corrections applied during compilation",
     )
     parser.add_argument(
         "--discovery-output",
@@ -259,7 +328,7 @@ def main() -> None:
         )
         write_discovery_csv(sources, args.discovery_output)
 
-    compile_seed_csv(args.discovery_output, args.seed_output)
+    compile_seed_csv(args.discovery_output, args.seed_output, args.overrides)
 
 
 if __name__ == "__main__":

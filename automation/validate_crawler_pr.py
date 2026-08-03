@@ -46,7 +46,7 @@ def generated_directories(workspace: Path, base_ref: str) -> list[Path]:
         if (
             len(path.parts) != 4
             or path.parts[0] != "crawlers"
-            or len(path.parts[1]) != 2
+            or (len(path.parts[1]) != 2 and path.parts[1] != "common")
             or path.name not in {"main.py", "BLOCKED.md"}
         ):
             raise PullRequestValidationError(f"change outside generated crawler scope: {raw_path}")
@@ -80,11 +80,22 @@ def generated_directories(workspace: Path, base_ref: str) -> list[Path]:
             raise PullRequestValidationError(f"existing crawler may not be modified: {directory}")
         main_path = workspace / directory / "main.py"
         blocked_path = workspace / directory / "BLOCKED.md"
+        base_blocked = command(
+            ["git", "cat-file", "-e", f"{base_ref}:{directory}/BLOCKED.md"],
+            workspace,
+        ).returncode == 0
+        if not main_path.exists() and not blocked_path.exists() and base_blocked:
+            continue
         if main_path.exists() == blocked_path.exists():
             raise PullRequestValidationError(
                 f"{directory} must contain exactly one of main.py or BLOCKED.md"
             )
-    return sorted(directories)
+    return sorted(
+        directory
+        for directory in directories
+        if (workspace / directory / "main.py").exists()
+        or (workspace / directory / "BLOCKED.md").exists()
+    )
 
 
 def validate_directory(workspace: Path, directory: Path) -> dict:
@@ -132,6 +143,31 @@ def validate_directory(workspace: Path, directory: Path) -> dict:
         raise PullRequestValidationError(
             f"{directory} must use structured logging instead of print()"
         )
+    configured_countries = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = (
+            node.func.id
+            if isinstance(node.func, ast.Name)
+            else node.func.attr if isinstance(node.func, ast.Attribute) else None
+        )
+        if name != "CrawlerConfig":
+            continue
+        for keyword in node.keywords:
+            if keyword.arg == "country_code":
+                try:
+                    configured_countries.append(ast.literal_eval(keyword.value))
+                except (ValueError, TypeError) as exc:
+                    raise PullRequestValidationError(
+                        f"{directory} country_code must be a literal ISO code or None"
+                    ) from exc
+    directory_country = directory.parts[1]
+    if directory_country == "common":
+        if configured_countries != [None]:
+            raise PullRequestValidationError(
+                f"{directory} must use country_code=None"
+            )
     return {"status": "passed", "kind": "crawler"}
 
 

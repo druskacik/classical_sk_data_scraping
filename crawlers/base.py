@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import logging
+import re
 from typing import Any, Literal
 
 import pandas as pd
@@ -17,7 +18,7 @@ class CrawlerConfig:
     slug: str
     source: str
     source_url: str
-    country_code: str = 'SK'
+    country_code: str | None = 'SK'
     columns: list[str] | None = None
     upload_target: UploadTarget = 'classical'
     dedupe_subset: list[str] | None = None
@@ -25,8 +26,10 @@ class CrawlerConfig:
     csv_path: str | None = None
 
     def __post_init__(self):
+        if self.country_code is None:
+            return
         country_code = self.country_code.upper()
-        if len(country_code) != 2:
+        if not re.fullmatch(r'[A-Z]{2}', country_code):
             raise ValueError(f'country_code must be an ISO 3166-1 alpha-2 code, got {self.country_code!r}')
         object.__setattr__(self, 'country_code', country_code)
 
@@ -60,6 +63,10 @@ class BaseCrawler:
         for column, value in self.config.front_fields:
             df.insert(0, column, value)
 
+        if 'country_code' not in df.columns and self.config.country_code is None:
+            raise ValueError(
+                'country_code is required on every record when CrawlerConfig.country_code is None'
+            )
         if 'country_code' not in df.columns:
             df.insert(0, 'country_code', self.config.country_code)
         else:

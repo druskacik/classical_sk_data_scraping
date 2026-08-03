@@ -321,13 +321,28 @@ class CrawlerSource(Base):
             name="ck_crawler_source_status",
         ),
         CheckConstraint("priority >= 0", name="ck_crawler_source_priority"),
+        CheckConstraint(
+            "geographic_scope IN ('unknown', 'country', 'multi_country')",
+            name="ck_crawler_source_geographic_scope",
+        ),
+        CheckConstraint(
+            "geographic_scope = 'unknown' OR "
+            "(geographic_scope = 'country' AND country_code IS NOT NULL AND "
+            "crawler_path IS NOT NULL AND country_code ~ '^[A-Z]{2}$' AND "
+            "crawler_path ~ ('^crawlers/' || lower(country_code) || '/[^/]+$')) OR "
+            "(geographic_scope = 'multi_country' AND country_code IS NULL AND "
+            "crawler_path IS NOT NULL AND "
+            "crawler_path ~ '^crawlers/common/[^/]+$')",
+            name="ck_crawler_source_geographic_identity",
+        ),
         UniqueConstraint("crawler_path", name="uq_crawler_source_crawler_path"),
         Index("ix_crawler_source_due", "status", "next_attempt_at", "priority"),
         Index("ix_crawler_source_lease", "lease_expires_at"),
     )
 
     id = Column(BigInteger, primary_key=True)
-    country_code = Column(String(2), nullable=False)
+    country_code = Column(String(2))
+    geographic_scope = Column(String, nullable=False, server_default="unknown")
     canonical_url = Column(Text, nullable=False)
     crawler_path = Column(Text)
     status = Column(String, nullable=False, server_default="pending")
