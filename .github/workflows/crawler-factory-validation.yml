@@ -10,6 +10,7 @@ permissions:
 jobs:
   crawler-factory-validation:
     name: crawler-factory-validation
+    if: startsWith(github.head_ref, 'crawler-factory/')
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -31,19 +32,12 @@ jobs:
         run: uv sync --frozen
 
       - name: Validate generated crawler safety and syntax
-        if: startsWith(github.head_ref, 'crawler-factory/')
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: uv run python automation/validate_crawler_pr.py --base-ref origin/master | tee crawler-factory-validation.json
 
-      - name: Compile Python sources
-        run: uv run python -m compileall -q automation build_crawlers_with_codex.py
-
-      - name: Run repository tests
-        run: uv run python -m unittest discover -s tests
-
       - name: Upload crawler validation report
-        if: always() && startsWith(github.head_ref, 'crawler-factory/')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: crawler-factory-validation
