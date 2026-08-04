@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import os
 import re
-import threading
 from dataclasses import dataclass
 from datetime import date, time
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 import psycopg2
 from psycopg2.extras import Json
 import pystache
 from dotenv import load_dotenv
-from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
+from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
 from agent_utils.concert_catalog import normalize
 from crawlers.cities import normalize_city_key
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_LIMIT = 200
+DEFAULT_CONCURRENCY = 4
 DEFAULT_TIMEOUT_SECONDS = 600
 MAX_AUTOMATIC_ATTEMPTS = 3
 NO_PROGRAM_RETRY_INTERVAL_DAYS = 7
@@ -297,9 +299,24 @@ def expire_old_no_program(conn) -> None:
     conn.commit()
 
 
-def validate_model(codex: Codex, model: str) -> None:
+def resolve_concurrency(cli_value: int | None = None) -> int:
+    raw_value: int | str = (
+        cli_value
+        if cli_value is not None
+        else os.getenv("CONCERT_PROGRAM_CONCURRENCY", DEFAULT_CONCURRENCY)
+    )
     try:
-        available = {item.model for item in codex.models().data}
+        concurrency = int(raw_value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"must be a positive integer, got {raw_value!r}") from error
+    if concurrency < 1:
+        raise ValueError(f"must be at least 1, got {concurrency}")
+    return concurrency
+
+
+async def validate_model(codex: AsyncCodex, model: str) -> None:
+    try:
+        available = {item.model for item in (await codex.models()).data}
     except Exception as sdk_error:
         cache_path = Path(os.getenv("CODEX_HOME", Path.home() / ".codex")) / "models_cache.json"
         try:
@@ -318,15 +335,20 @@ def validate_model(codex: Codex, model: str) -> None:
         raise RuntimeError(f"Codex model {model!r} is unavailable. Available models: {', '.join(sorted(available))}")
 
 
-def run_agent(codex: Codex, concert: Concert, model: str, timeout_seconds: int) -> dict[str, Any]:
-    thread = codex.thread_start(
+async def run_agent(
+    codex: AsyncCodex,
+    concert: Concert,
+    model: str,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    thread = await codex.thread_start(
         approval_mode=ApprovalMode.deny_all,
         cwd=str(Path.cwd()),
         ephemeral=False,
         model=model,
         sandbox=Sandbox.full_access,
     )
-    turn = thread.turn(
+    turn = await thread.turn(
         render_prompt(concert),
         approval_mode=ApprovalMode.deny_all,
         cwd=str(Path.cwd()),
@@ -334,13 +356,19 @@ def run_agent(codex: Codex, concert: Concert, model: str, timeout_seconds: int) 
         output_schema=OUTPUT_SCHEMA,
         sandbox=Sandbox.full_access,
     )
-    timer = threading.Timer(timeout_seconds, turn.interrupt)
-    timer.daemon = True
-    timer.start()
     try:
-        result = turn.run()
-    finally:
-        timer.cancel()
+        result = await asyncio.wait_for(turn.run(), timeout=timeout_seconds)
+    except TimeoutError:
+        try:
+            await turn.interrupt()
+        except Exception:
+            logger.exception(
+                "Could not interrupt timed-out Codex turn",
+                extra={"event": "programme_analysis_interrupt_failed", "concert_id": concert.id},
+            )
+        raise TimeoutError(
+            f"Concert programme analysis exceeded {timeout_seconds} seconds"
+        )
     if result.error:
         raise RuntimeError(str(result.error))
     if not result.final_response:
@@ -919,19 +947,181 @@ def release_lock(conn) -> None:
         cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", (ADVISORY_LOCK_NAME,))
 
 
+def validate_and_persist_result(
+    concert: Concert,
+    result: dict[str, Any],
+    model: str,
+    commit: bool,
+) -> None:
+    conn = get_connection()
+    try:
+        validate_result(conn, concert, result)
+        event_updates = validate_event_updates(conn, concert, result["event_updates"])
+        location_resolution = validate_location_resolution(
+            conn,
+            concert,
+            result.get("location_resolution", {"status": "not_needed"}),
+            page_available=result["status"] != "page_unavailable",
+        )
+        if commit:
+            persist_result(
+                conn,
+                concert,
+                result,
+                model,
+                event_updates,
+                location_resolution,
+            )
+    finally:
+        conn.close()
+
+
+def persist_concert_error(concert: Concert, model: str, error: Exception) -> None:
+    conn = get_connection()
+    try:
+        persist_error(conn, concert, model, error)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+async def analyze_concert(
+    codex: AsyncCodex,
+    semaphore: asyncio.Semaphore,
+    concert: Concert,
+    model: str,
+    commit: bool,
+    timeout_seconds: int,
+) -> bool:
+    async with semaphore:
+        started_at = monotonic()
+        logger.info(
+            "Analyzing concert programme",
+            extra={"event": "programme_analysis_started", "concert_id": concert.id},
+        )
+        try:
+            result = await run_agent(codex, concert, model, timeout_seconds)
+            validate_and_persist_result(concert, result, model, commit)
+            logger.info(
+                "Concert programme analysis completed",
+                extra={
+                    "event": "programme_analysis_completed",
+                    "concert_id": concert.id,
+                    "status": result["status"],
+                    "composer_count": len(result.get("composers") or []),
+                    "unresolved_count": len(result.get("unresolved_program") or []),
+                    "commit": commit,
+                    "duration_seconds": round(monotonic() - started_at, 3),
+                    **({} if commit else {"analysis_result": result}),
+                },
+            )
+            if not commit:
+                logger.info(
+                    "Dry run; no database changes made",
+                    extra={
+                        "event": "programme_analysis_dry_run",
+                        "concert_id": concert.id,
+                    },
+                )
+            return False
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.exception(
+                "Concert programme analysis failed",
+                extra={
+                    "event": "programme_analysis_failed",
+                    "concert_id": concert.id,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                    "duration_seconds": round(monotonic() - started_at, 3),
+                },
+            )
+            if commit:
+                try:
+                    persist_concert_error(concert, model, error)
+                except Exception as persistence_error:
+                    logger.exception(
+                        "Could not persist concert programme analysis failure",
+                        extra={
+                            "event": "programme_analysis_error_persistence_failed",
+                            "concert_id": concert.id,
+                            "error_type": type(persistence_error).__name__,
+                            "error_message": str(persistence_error),
+                        },
+                    )
+            return True
+
+
+async def run_concerts(
+    concerts: list[Concert],
+    *,
+    model: str,
+    commit: bool,
+    timeout_seconds: int,
+    concurrency: int,
+) -> int:
+    started_at = monotonic()
+    logger.info(
+        "Starting concert programme analysis batch",
+        extra={
+            "event": "programme_analysis_batch_started",
+            "selected_count": len(concerts),
+            "concurrency": concurrency,
+            "commit": commit,
+        },
+    )
+    semaphore = asyncio.Semaphore(concurrency)
+    async with AsyncCodex(
+        CodexConfig(codex_bin=os.getenv("CODEX_BIN"), cwd=str(Path.cwd()))
+    ) as codex:
+        await validate_model(codex, model)
+        results = await asyncio.gather(
+            *(
+                analyze_concert(
+                    codex,
+                    semaphore,
+                    concert,
+                    model,
+                    commit,
+                    timeout_seconds,
+                )
+                for concert in concerts
+            )
+        )
+    failures = sum(results)
+    logger.info(
+        "Concert programme analysis batch completed",
+        extra={
+            "event": "programme_analysis_batch_completed",
+            "selected_count": len(concerts),
+            "completed_count": len(concerts) - failures,
+            "failure_count": failures,
+            "concurrency": concurrency,
+            "commit": commit,
+            "duration_seconds": round(monotonic() - started_at, 3),
+        },
+    )
+    return failures
+
+
 def run(
     *,
     concert_ids: list[int] | None = None,
     limit: int = DEFAULT_LIMIT,
+    concurrency: int = DEFAULT_CONCURRENCY,
     model: str = DEFAULT_MODEL,
     commit: bool = False,
     force: bool = False,
     unresolved_locations: bool = False,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> int:
+    if concurrency < 1:
+        raise ValueError(f"concurrency must be at least 1, got {concurrency}")
     conn = get_connection()
     locked = False
-    failures = 0
     try:
         if commit:
             locked = acquire_lock(conn)
@@ -945,64 +1135,15 @@ def run(
                 extra={"event": "programme_queue_empty"},
             )
             return 0
-        with Codex(
-            CodexConfig(codex_bin=os.getenv("CODEX_BIN"), cwd=str(Path.cwd()))
-        ) as codex:
-            validate_model(codex, model)
-            for concert in concerts:
-                logger.info(
-                    "Analyzing concert programme",
-                    extra={"event": "programme_analysis_started", "concert_id": concert.id},
-                )
-                try:
-                    result = run_agent(codex, concert, model, timeout_seconds)
-                    validate_result(conn, concert, result)
-                    event_updates = validate_event_updates(
-                        conn,
-                        concert,
-                        result["event_updates"],
-                    )
-                    location_resolution = validate_location_resolution(
-                        conn,
-                        concert,
-                        result.get("location_resolution", {"status": "not_needed"}),
-                        page_available=result["status"] != "page_unavailable",
-                    )
-                    logger.info(
-                        "Concert programme analysis completed",
-                        extra={
-                            "event": "programme_analysis_completed",
-                            "concert_id": concert.id,
-                            "status": result["status"],
-                            "composer_count": len(result.get("composers") or []),
-                            "unresolved_count": len(result.get("unresolved_program") or []),
-                            "commit": commit,
-                            **({} if commit else {"analysis_result": result}),
-                        },
-                    )
-                    if commit:
-                        persist_result(
-                            conn, concert, result, model, event_updates, location_resolution
-                        )
-                    else:
-                        logger.info(
-                            "Dry run; no database changes made",
-                            extra={"event": "programme_analysis_dry_run", "concert_id": concert.id},
-                        )
-                except Exception as error:
-                    failures += 1
-                    logger.exception(
-                        "Concert programme analysis failed",
-                        extra={
-                            "event": "programme_analysis_failed",
-                            "concert_id": concert.id,
-                            "error_type": type(error).__name__,
-                            "error_message": str(error),
-                        },
-                    )
-                    if commit:
-                        persist_error(conn, concert, model, error)
-        return failures
+        return asyncio.run(
+            run_concerts(
+                concerts,
+                model=model,
+                commit=commit,
+                timeout_seconds=timeout_seconds,
+                concurrency=concurrency,
+            )
+        )
     finally:
         if locked:
             release_lock(conn)
@@ -1011,7 +1152,7 @@ def run(
 
 def scheduled_main() -> None:
     configure_logging("classical-bot")
-    failures = run(commit=True)
+    failures = run(commit=True, concurrency=resolve_concurrency())
     if failures:
         raise RuntimeError(f"{failures} concert programme analyses failed")
 
@@ -1020,6 +1161,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract composers and works with Codex.")
     parser.add_argument("--concert-id", type=int, action="append", dest="concert_ids")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        help=(
+            "Maximum simultaneous analyses "
+            f"(default: CONCERT_PROGRAM_CONCURRENCY or {DEFAULT_CONCURRENCY})"
+        ),
+    )
     parser.add_argument("--model", default=os.getenv("CONCERT_PROGRAM_CODEX_MODEL", DEFAULT_MODEL))
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--commit", action="store_true")
@@ -1035,9 +1184,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     configure_logging("classical-bot")
     args = parse_args()
+    try:
+        concurrency = resolve_concurrency(args.concurrency)
+    except ValueError as error:
+        raise SystemExit(f"Invalid concert programme concurrency: {error}") from error
     failures = run(
         concert_ids=args.concert_ids,
         limit=args.limit,
+        concurrency=concurrency,
         model=args.model,
         commit=args.commit,
         force=args.force,

@@ -1,10 +1,11 @@
+import asyncio
 import io
 import json
 import os
 import tempfile
 import unittest
 from datetime import date, time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent_utils import concert_catalog
 from agent_utils.concert_catalog import normalize
@@ -375,9 +376,13 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
 
     def test_agent_threads_are_persistent(self):
         codex = MagicMock()
+        codex.thread_start = AsyncMock()
         thread = codex.thread_start.return_value
-        thread.turn.return_value.run.return_value.error = None
-        thread.turn.return_value.run.return_value.final_response = json.dumps(
+        thread.turn = AsyncMock()
+        turn = thread.turn.return_value
+        turn.run = AsyncMock()
+        turn.run.return_value.error = None
+        turn.run.return_value.final_response = json.dumps(
             {
                 "status": "no_program",
                 "source_url": "https://example.test",
@@ -390,32 +395,15 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         )
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
 
-        analyzer.run_agent(codex, concert, "gpt-5.6-terra", timeout_seconds=30)
+        asyncio.run(analyzer.run_agent(codex, concert, "gpt-5.6-terra", timeout_seconds=30))
 
         self.assertIs(codex.thread_start.call_args.kwargs["ephemeral"], False)
 
-    @patch.object(analyzer, "persist_result")
-    @patch.object(analyzer, "validate_result")
-    @patch.object(analyzer, "run_agent")
-    @patch.object(analyzer, "validate_model")
-    @patch.object(analyzer, "select_concerts")
-    @patch.object(analyzer, "get_connection")
-    @patch.object(analyzer, "Codex")
-    def test_dry_run_never_persists(
-        self,
-        codex_class,
-        get_connection,
-        select_concerts,
-        _validate_model,
-        run_agent,
-        _validate_result,
-        persist_result,
-    ):
-        conn = MagicMock()
-        get_connection.return_value = conn
+    def test_dry_run_never_persists(self):
+        coordinator_conn = MagicMock()
+        worker_conn = MagicMock()
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
-        select_concerts.return_value = [concert]
-        run_agent.return_value = {
+        result = {
             "status": "complete",
             "source_url": concert.url,
             "notes": "",
@@ -430,15 +418,32 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
                 "source_url": "", "evidence": "",
             },
         }
-        codex_class.return_value.__enter__.return_value = MagicMock()
-        with patch("sys.stdout", new_callable=io.StringIO):
+        codex_class = MagicMock()
+        codex_class.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        codex_class.return_value.__aexit__ = AsyncMock(return_value=None)
+        with (
+            patch.object(analyzer, "AsyncCodex", codex_class),
+            patch.object(
+                analyzer,
+                "get_connection",
+                side_effect=[coordinator_conn, worker_conn],
+            ),
+            patch.object(analyzer, "select_concerts", return_value=[concert]),
+            patch.object(analyzer, "validate_model", new_callable=AsyncMock),
+            patch.object(analyzer, "run_agent", new_callable=AsyncMock, return_value=result),
+            patch.object(analyzer, "validate_result"),
+            patch.object(analyzer, "persist_result") as persist_result,
+            patch("sys.stdout", new_callable=io.StringIO),
+        ):
             failures = analyzer.run(concert_ids=[1], commit=False)
         self.assertEqual(failures, 0)
         config = codex_class.call_args.args[0]
         self.assertIsNone(config.codex_bin)
         persist_result.assert_not_called()
-        conn.commit.assert_not_called()
-        conn.close.assert_called_once()
+        coordinator_conn.commit.assert_not_called()
+        worker_conn.commit.assert_not_called()
+        coordinator_conn.close.assert_called_once()
+        worker_conn.close.assert_called_once()
 
     def test_output_schema_enforces_paired_entities(self):
         self.assertIn("composer_only", analyzer.OUTPUT_SCHEMA["properties"]["status"]["enum"])
@@ -757,12 +762,195 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
 
     def test_model_validation_falls_back_to_local_catalogue(self):
         codex = MagicMock()
-        codex.models.side_effect = ValueError("new enum value")
+        codex.models = AsyncMock(side_effect=ValueError("new enum value"))
         with tempfile.TemporaryDirectory() as directory:
             with open(os.path.join(directory, "models_cache.json"), "w", encoding="utf-8") as handle:
                 json.dump({"models": [{"slug": "gpt-5.6-terra"}]}, handle)
             with patch.dict(os.environ, {"CODEX_HOME": directory}):
-                analyzer.validate_model(codex, "gpt-5.6-terra")
+                asyncio.run(analyzer.validate_model(codex, "gpt-5.6-terra"))
+
+    def test_concurrency_defaults_to_four_and_honors_cli_then_environment(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(analyzer.resolve_concurrency(), 4)
+        with patch.dict(os.environ, {"CONCERT_PROGRAM_CONCURRENCY": "7"}):
+            self.assertEqual(analyzer.resolve_concurrency(), 7)
+            self.assertEqual(analyzer.resolve_concurrency(2), 2)
+
+    def test_concurrency_rejects_invalid_values(self):
+        for value in (0, -1, "many"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "must be"):
+                    analyzer.resolve_concurrency(value)
+
+    def test_async_batch_never_exceeds_configured_concurrency(self):
+        concerts = [
+            analyzer.Concert(index, f"Test {index}", date.today(), "https://example.test", None)
+            for index in range(1, 9)
+        ]
+        active = 0
+        maximum_active = 0
+
+        async def agent_result(_codex, concert, _model, _timeout):
+            nonlocal active, maximum_active
+            active += 1
+            maximum_active = max(maximum_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return {
+                "status": "no_program",
+                "source_url": concert.url,
+                "notes": "No programme published.",
+                "composers": [],
+                "program": [],
+                "unresolved_program": [],
+                "event_updates": [],
+            }
+
+        codex_class = MagicMock()
+        codex_class.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        codex_class.return_value.__aexit__ = AsyncMock(return_value=None)
+        with (
+            patch.object(analyzer, "AsyncCodex", codex_class),
+            patch.object(analyzer, "validate_model", new_callable=AsyncMock),
+            patch.object(
+                analyzer,
+                "run_agent",
+                new=AsyncMock(side_effect=agent_result),
+            ) as run_agent,
+            patch.object(analyzer, "validate_and_persist_result"),
+        ):
+            failures = asyncio.run(
+                analyzer.run_concerts(
+                    concerts,
+                    model="gpt-5.6-terra",
+                    commit=False,
+                    timeout_seconds=30,
+                    concurrency=4,
+                )
+            )
+
+        self.assertEqual(failures, 0)
+        self.assertEqual(run_agent.await_count, 8)
+        self.assertEqual(maximum_active, 4)
+
+    def test_parallel_results_use_independent_database_connections(self):
+        concerts = [
+            analyzer.Concert(index, f"Test {index}", date.today(), "https://example.test", None)
+            for index in (1, 2)
+        ]
+        connections = [MagicMock(), MagicMock()]
+
+        async def agent_result(_codex, concert, _model, _timeout):
+            return {
+                "status": "no_program",
+                "source_url": concert.url,
+                "notes": "No programme published.",
+                "composers": [],
+                "program": [],
+                "unresolved_program": [],
+                "event_updates": [],
+            }
+
+        with (
+            patch.object(analyzer, "run_agent", new=AsyncMock(side_effect=agent_result)),
+            patch.object(analyzer, "get_connection", side_effect=connections),
+            patch.object(analyzer, "validate_result"),
+            patch.object(analyzer, "validate_event_updates", return_value=[]),
+            patch.object(analyzer, "validate_location_resolution", return_value=None),
+            patch.object(analyzer, "persist_result") as persist_result,
+        ):
+            async def run_all():
+                semaphore = asyncio.Semaphore(2)
+                return await asyncio.gather(
+                    *(
+                        analyzer.analyze_concert(
+                            MagicMock(),
+                            semaphore,
+                            concert,
+                            "gpt-5.6-terra",
+                            True,
+                            30,
+                        )
+                        for concert in concerts
+                    )
+                )
+
+            results = asyncio.run(run_all())
+
+        self.assertEqual(results, [False, False])
+        self.assertEqual([call.args[0] for call in persist_result.call_args_list], connections)
+        for connection in connections:
+            connection.close.assert_called_once()
+
+    def test_timeout_interrupts_only_its_turn(self):
+        codex = MagicMock()
+        codex.thread_start = AsyncMock()
+        thread = codex.thread_start.return_value
+        thread.turn = AsyncMock()
+        turn = thread.turn.return_value
+
+        async def never_finishes():
+            await asyncio.Event().wait()
+
+        turn.run = AsyncMock(side_effect=never_finishes)
+        turn.interrupt = AsyncMock()
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+
+        with self.assertRaisesRegex(TimeoutError, "exceeded"):
+            asyncio.run(analyzer.run_agent(codex, concert, "gpt-5.6-terra", 0.01))
+        turn.interrupt.assert_awaited_once()
+
+    def test_one_concert_failure_does_not_cancel_siblings(self):
+        concerts = [
+            analyzer.Concert(index, f"Test {index}", date.today(), "https://example.test", None)
+            for index in range(1, 4)
+        ]
+        completed = []
+
+        async def agent_result(_codex, concert, _model, _timeout):
+            if concert.id == 2:
+                raise RuntimeError("one failure")
+            completed.append(concert.id)
+            return {
+                "status": "no_program",
+                "source_url": concert.url,
+                "notes": "No programme published.",
+                "composers": [],
+                "program": [],
+                "unresolved_program": [],
+                "event_updates": [],
+            }
+
+        with (
+            patch.object(analyzer, "run_agent", new=AsyncMock(side_effect=agent_result)),
+            patch.object(analyzer, "validate_and_persist_result"),
+            patch.object(
+                analyzer,
+                "persist_concert_error",
+                side_effect=RuntimeError("error persistence failed"),
+            ) as persist_concert_error,
+        ):
+            async def run_all():
+                semaphore = asyncio.Semaphore(2)
+                return await asyncio.gather(
+                    *(
+                        analyzer.analyze_concert(
+                            MagicMock(),
+                            semaphore,
+                            concert,
+                            "gpt-5.6-terra",
+                            True,
+                            30,
+                        )
+                        for concert in concerts
+                    )
+                )
+
+            results = asyncio.run(run_all())
+
+        self.assertEqual(results.count(True), 1)
+        self.assertEqual(completed, [1, 3])
+        persist_concert_error.assert_called_once()
 
 
 if __name__ == "__main__":
