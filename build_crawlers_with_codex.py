@@ -16,6 +16,14 @@ MODEL = "gpt-5.6-sol"
 PROMPT_PATH = Path("prompts/build_crawler.mustache")
 CRAWLERS_DIR = Path("crawlers")
 BLOCKED_MARKER = "BLOCKED.md"
+SENSITIVE_COMMAND_PATTERNS = (
+    re.compile(r"(?i)(authorization:\s*(?:bearer\s+)?)[^\s'\"]+"),
+    re.compile(
+        r"(?i)(\b[A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)[A-Z0-9_]*\s*=\s*)"
+        r"(?:'[^']*'|\"[^\"]*\"|[^\s]+)"
+    ),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{12,}\b"),
+)
 CZECH_DOMAINS = {".cz"}
 SLOVAK_DOMAINS = {".sk"}
 CZECH_HOSTS = {
@@ -86,6 +94,61 @@ def crawler_status(crawler_dir: Path) -> str:
     return "SKIP"
 
 
+def summarize_thread_items(items: list[object]) -> list[dict]:
+    """Keep useful agent activity metadata without retaining raw tool output."""
+
+    summaries = []
+    for item in items:
+        value = item.root if hasattr(item, "root") else item
+        item_type = getattr(value, "type", type(value).__name__)
+        summary = {"type": str(item_type), "id": getattr(value, "id", None)}
+        if item_type == "commandExecution":
+            command = str(getattr(value, "command", ""))
+            for pattern in SENSITIVE_COMMAND_PATTERNS:
+                command = pattern.sub(
+                    lambda match: (
+                        f"{match.group(1)}[REDACTED]"
+                        if match.lastindex
+                        else "[REDACTED]"
+                    ),
+                    command,
+                )
+            summary.update(
+                {
+                    "command": command,
+                    "cwd": str(getattr(value, "cwd", "")),
+                    "status": str(getattr(value, "status", "")),
+                    "exit_code": getattr(value, "exit_code", None),
+                    "duration_ms": getattr(value, "duration_ms", None),
+                }
+            )
+        elif item_type == "mcpToolCall":
+            summary.update(
+                {
+                    "server": getattr(value, "server", None),
+                    "tool": getattr(value, "tool", None),
+                    "status": str(getattr(value, "status", "")),
+                    "duration_ms": getattr(value, "duration_ms", None),
+                }
+            )
+        elif item_type == "fileChange":
+            paths = []
+            for change in getattr(value, "changes", []):
+                path = getattr(change, "path", None)
+                if path is not None:
+                    paths.append(str(path))
+            summary.update(
+                {
+                    "status": str(getattr(value, "status", "")),
+                    "paths": paths,
+                }
+            )
+        else:
+            continue
+        summaries.append(summary)
+    return summaries
+
+
 def build_crawler(
     codex: Codex,
     url: str,
@@ -151,6 +214,7 @@ def build_crawler(
         "status": "generated",
         "crawler_directory": str(crawler_dir.relative_to(workspace)),
         "final_response": result.final_response,
+        "item_summaries": summarize_thread_items(result.items),
         "error": None,
     }
 

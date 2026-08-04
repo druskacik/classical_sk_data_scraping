@@ -82,7 +82,10 @@ repeat a slow full-catalogue run solely for final validation.
 
 Only modify the expected new crawler directory. Do not modify shared crawler
 code, dependencies, workflows, prompts, configuration, environment files, or
-other crawlers. Do not commit or push changes.
+other crawlers. Store downloaded HTML, JSON responses, screenshots, and every
+other investigation artifact under `/tmp`, never inside the repository. Before
+finishing, run `git status --short` and remove every change outside the assigned
+crawler directory. Do not commit or push changes.
 
 Use the repository's structured logger for operational output:
 `from observability import log_message`. Do not call `print()` from a production

@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -12,9 +13,11 @@ import automation.run_crawler_factory as factory
 from automation.crawler_registry import normalize_source_url, normalized_crawler_path
 from automation.run_crawler_factory import (
     attempt_source,
+    cleanup_untracked_scope_artifacts,
     crawler_directory,
     generated_geography,
     normalize_blocked_metadata,
+    persist_failure_diagnostics,
     relocate_generated_directory,
     resolved_crawler_directory,
     parse_blocked_metadata,
@@ -26,7 +29,7 @@ from automation.validate_crawler_pr import (
     generated_directories,
     validate_directory,
 )
-from build_crawlers_with_codex import crawler_folder_name
+from build_crawlers_with_codex import crawler_folder_name, summarize_thread_items
 
 
 def blocked_text(url: str, country_code: str, attempted: date) -> str:
@@ -411,6 +414,160 @@ class ScopeTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "exactly one"):
                 validate_change_scope(workspace, expected)
 
+    def test_untracked_scratch_file_is_removed_and_reported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            expected = Path("crawlers/at/example_at")
+            main_path = workspace / expected / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text("# generated\n", encoding="utf-8")
+            scratch = workspace / "investigation.html"
+            scratch.write_text("<html></html>\n", encoding="utf-8")
+            report_path = root / "scope-report.json"
+
+            removed = cleanup_untracked_scope_artifacts(
+                workspace, expected, report_path
+            )
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(removed, ["investigation.html"])
+            self.assertFalse(scratch.exists())
+            self.assertEqual(report["removed_untracked_paths"], removed)
+            validate_change_scope(workspace, expected)
+
+    def test_tracked_out_of_scope_change_is_not_cleaned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            tracked = workspace / "pyproject.toml"
+            tracked.write_text("original\n", encoding="utf-8")
+            subprocess.run(["git", "add", "pyproject.toml"], cwd=workspace, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "initial"],
+                cwd=workspace,
+                check=True,
+            )
+            expected = Path("crawlers/at/example_at")
+            main_path = workspace / expected / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text("# generated\n", encoding="utf-8")
+            tracked.write_text("modified\n", encoding="utf-8")
+            report_path = root / "scope-report.json"
+
+            removed = cleanup_untracked_scope_artifacts(
+                workspace, expected, report_path
+            )
+
+            self.assertEqual(removed, [])
+            self.assertEqual(tracked.read_text(encoding="utf-8"), "modified\n")
+            with self.assertRaisesRegex(RuntimeError, "outside the allowed scope"):
+                validate_change_scope(workspace, expected)
+
+    def test_untracked_symlink_cleanup_does_not_touch_external_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            expected = Path("crawlers/at/example_at")
+            main_path = workspace / expected / "main.py"
+            main_path.parent.mkdir(parents=True)
+            main_path.write_text("# generated\n", encoding="utf-8")
+            external = root / "external.html"
+            external.write_text("keep me\n", encoding="utf-8")
+            scratch_link = workspace / "scratch.html"
+            scratch_link.symlink_to(external)
+
+            cleanup_untracked_scope_artifacts(
+                workspace, expected, root / "scope-report.json"
+            )
+
+            self.assertFalse(scratch_link.exists())
+            self.assertEqual(external.read_text(encoding="utf-8"), "keep me\n")
+
+    def test_failure_diagnostics_preserve_generated_crawler_and_tracked_patch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            run_dir = root / "run"
+            workspace.mkdir()
+            run_dir.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            tracked = workspace / "pyproject.toml"
+            tracked.write_text("original\n", encoding="utf-8")
+            subprocess.run(["git", "add", "pyproject.toml"], cwd=workspace, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "commit",
+                    "-qm",
+                    "initial",
+                ],
+                cwd=workspace,
+                check=True,
+            )
+            crawler = Path("crawlers/at/example_at")
+            generated = workspace / crawler / "main.py"
+            generated.parent.mkdir(parents=True)
+            generated.write_text("# generated\n", encoding="utf-8")
+            tracked.write_text("modified\n", encoding="utf-8")
+
+            diagnostic_dir = persist_failure_diagnostics(
+                workspace, run_dir, {"id": 83}, crawler
+            )
+
+            self.assertTrue((diagnostic_dir / "generated-crawler/main.py").exists())
+            self.assertIn(
+                "pyproject.toml",
+                (diagnostic_dir / "tracked.patch").read_text(encoding="utf-8"),
+            )
+            self.assertTrue((diagnostic_dir / "git-status.json").exists())
+
+
+class BuilderItemSummaryTests(unittest.TestCase):
+    def test_keeps_activity_metadata_without_outputs_or_arguments(self):
+        items = [
+            SimpleNamespace(
+                type="commandExecution",
+                id="command-1",
+                command="API_TOKEN=secret curl -H 'Authorization: Bearer hidden' https://example.com > /tmp/page.html",
+                cwd="/workspace",
+                status="completed",
+                exit_code=0,
+                duration_ms=12,
+                aggregated_output="sensitive page contents",
+            ),
+            SimpleNamespace(
+                type="mcpToolCall",
+                id="tool-1",
+                server="playwright",
+                tool="navigate",
+                status="completed",
+                duration_ms=20,
+                arguments={"token": "secret"},
+                result="page contents",
+            ),
+        ]
+
+        summaries = summarize_thread_items(items)
+
+        self.assertIn("[REDACTED]", summaries[0]["command"])
+        self.assertNotIn("secret", summaries[0]["command"])
+        self.assertNotIn("hidden", summaries[0]["command"])
+        self.assertEqual(summaries[1]["tool"], "navigate")
+        self.assertNotIn("aggregated_output", summaries[0])
+        self.assertNotIn("arguments", summaries[1])
+        self.assertNotIn("result", summaries[1])
+
 
 class AttemptTests(unittest.TestCase):
     SOURCE = {
@@ -419,6 +576,75 @@ class AttemptTests(unittest.TestCase):
         "country_code": "CZ",
         "crawler_path": "crawlers/cz/hamu_cz",
     }
+
+    def test_untracked_scratch_artifact_is_cleaned_before_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            run_dir = root / "runs"
+            workspace.mkdir()
+            run_dir.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+            original_run_command = factory.run_command
+
+            def fake_run_command(command, **kwargs):
+                if any(str(part).endswith("build_crawlers_with_codex.py") for part in command):
+                    path = workspace / self.SOURCE["crawler_path"] / "main.py"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(
+                        'from crawlers.base import CrawlerConfig\n'
+                        'config = CrawlerConfig(slug="hamu_cz", source="HAMU", '
+                        'source_url="https://www.hamu.cz/", country_code="CZ")\n',
+                        encoding="utf-8",
+                    )
+                    (workspace / "scratch.html").write_text("scratch\n", encoding="utf-8")
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if "automation.validate_generated_crawler" in command:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        json.dumps(
+                            {
+                                "status": "passed",
+                                "record_count": 2,
+                                "issue_count": 0,
+                                "issues": [],
+                                "duration_seconds": 0.2,
+                            }
+                        ),
+                        "",
+                    )
+                return original_run_command(command, **kwargs)
+
+            with (
+                patch.object(factory, "run_command", side_effect=fake_run_command),
+                patch.object(factory, "git_commit", return_value="abc123"),
+                self.assertLogs(factory.logger, level="WARNING") as captured,
+            ):
+                result = attempt_source(
+                    workspace,
+                    run_dir,
+                    self.SOURCE,
+                    30,
+                    {},
+                    run_id="run-1",
+                    attempt_id=99,
+                )
+
+            scope_report = json.loads(
+                Path(result["scope_report_path"]).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(scope_report["removed_untracked_paths"], ["scratch.html"])
+        self.assertTrue(
+            any(
+                getattr(record, "event", None) == "factory_source_scope_cleanup"
+                and record.run_id == "run-1"
+                and record.source_id == 12
+                for record in captured.records
+            )
+        )
 
     def test_generated_country_correction_relocates_before_commit(self):
         source = {

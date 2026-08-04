@@ -192,11 +192,22 @@ def sanitized_child_env(run_dir: Path) -> dict[str, str]:
 
 
 def changed_paths(workspace: Path) -> list[str]:
+    return sorted(
+        {
+            path
+            for entry in changed_entries(workspace)
+            for path in (entry["path"], entry.get("original_path"))
+            if path
+        }
+    )
+
+
+def changed_entries(workspace: Path) -> list[dict[str, str | None]]:
     result = run_command(
         ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
         cwd=workspace,
     )
-    paths = []
+    entries_out = []
     entries = result.stdout.split("\0")
     index = 0
     while index < len(entries):
@@ -206,18 +217,20 @@ def changed_paths(workspace: Path) -> list[str]:
             continue
         status = entry[:2]
         path = entry[3:]
+        original_path = None
         if status[0] in {"R", "C"} and index < len(entries):
-            path = entries[index]
+            original_path = entries[index]
             index += 1
-        paths.append(path)
-    return paths
+        entries_out.append(
+            {"status": status, "path": path, "original_path": original_path}
+        )
+    return entries_out
 
 
-def validate_change_scope(
-    workspace: Path,
+def allowed_scope_paths(
     expected_directory: Path,
     previous_directory: Path | None = None,
-) -> None:
+) -> set[str]:
     allowed = {
         str(expected_directory / "main.py"),
         str(expected_directory / "BLOCKED.md"),
@@ -229,6 +242,41 @@ def validate_change_scope(
                 str(previous_directory / "BLOCKED.md"),
             }
         )
+    return allowed
+
+
+def cleanup_untracked_scope_artifacts(
+    workspace: Path,
+    expected_directory: Path,
+    report_path: Path,
+    previous_directory: Path | None = None,
+) -> list[str]:
+    """Remove unexpected files only when every violation is untracked."""
+
+    allowed = allowed_scope_paths(expected_directory, previous_directory)
+    before = changed_entries(workspace)
+    unexpected = [
+        entry
+        for entry in before
+        if entry["path"] not in allowed
+        or (entry.get("original_path") and entry["original_path"] not in allowed)
+    ]
+    removed: list[str] = []
+    if unexpected and all(entry["status"] == "??" for entry in unexpected):
+        removed = sorted({str(entry["path"]) for entry in unexpected})
+        run_command(["git", "clean", "-fd", "--", *removed], cwd=workspace)
+    report = {"before": before, "removed_untracked_paths": removed}
+    report["after"] = changed_entries(workspace)
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return removed
+
+
+def validate_change_scope(
+    workspace: Path,
+    expected_directory: Path,
+    previous_directory: Path | None = None,
+) -> None:
+    allowed = allowed_scope_paths(expected_directory, previous_directory)
     paths = set(changed_paths(workspace))
     unexpected = sorted(paths - allowed)
     if not paths:
@@ -376,6 +424,65 @@ def validation_error(report: dict) -> str:
     return f"live validation {status}: {report.get('error') or 'unknown error'}"
 
 
+def persist_failure_diagnostics(
+    workspace: Path,
+    run_dir: Path,
+    source: dict,
+    crawler_directory: Path,
+) -> Path:
+    diagnostic_dir = run_dir / f"{source['id']}-{crawler_directory.name}-failure"
+    diagnostic_dir.mkdir(parents=True, exist_ok=True)
+    (diagnostic_dir / "git-status.json").write_text(
+        json.dumps(changed_entries(workspace), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    unstaged = run_command(
+        ["git", "diff", "--no-ext-diff", "--binary"], cwd=workspace, check=False
+    ).stdout
+    staged = run_command(
+        ["git", "diff", "--cached", "--no-ext-diff", "--binary"],
+        cwd=workspace,
+        check=False,
+    ).stdout
+    (diagnostic_dir / "tracked.patch").write_text(
+        unstaged + staged,
+        encoding="utf-8",
+    )
+    generated = workspace / crawler_directory
+    if generated.exists():
+        shutil.copytree(
+            generated,
+            diagnostic_dir / "generated-crawler",
+            dirs_exist_ok=True,
+            symlinks=True,
+        )
+    return diagnostic_dir
+
+
+def read_builder_report(builder_report: Path, item_summary_path: Path, result: dict) -> None:
+    if not builder_report.exists():
+        return
+    try:
+        builder_data = json.loads(builder_report.read_text(encoding="utf-8"))
+        if not builder_data:
+            return
+        latest = builder_data[-1]
+        result["final_response"] = latest.get("final_response")
+        summaries = latest.get("item_summaries") or []
+        item_summary_path.write_text(
+            json.dumps(summaries, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        result["builder_item_summary_path"] = str(item_summary_path)
+    except (json.JSONDecodeError, OSError, TypeError, AttributeError) as exc:
+        warning = f"builder report could not be read: {type(exc).__name__}"
+        result["generation_warning"] = (
+            f"{result['generation_warning']}; {warning}"
+            if result["generation_warning"]
+            else warning
+        )
+
+
 def attempt_source(
     workspace: Path,
     run_dir: Path,
@@ -385,12 +492,25 @@ def attempt_source(
     model: str = MODEL,
     validation_timeout_minutes: int = DEFAULT_VALIDATION_TIMEOUT_MINUTES,
     identity_resolver: Callable[[dict, str, str | None, str], dict] | None = None,
+    *,
+    run_id: str | None = None,
+    attempt_id: int | None = None,
 ) -> dict:
     started = time.monotonic()
     url = source["canonical_url"]
     directory = source_directory(source)
     slug = directory.name
     builder_report = run_dir / f"{source['id']}-{slug}-builder.json"
+    builder_items = run_dir / f"{source['id']}-{slug}-builder-items.json"
+    scope_report = run_dir / f"{source['id']}-{slug}-scope.json"
+    stage = "builder"
+    context = {
+        "run_id": run_id,
+        "attempt_id": attempt_id,
+        "source_id": source["id"],
+        "url": url,
+        "crawler_directory": str(directory),
+    }
     result = {
         "source_id": source["id"],
         "url": url,
@@ -406,7 +526,15 @@ def attempt_source(
         "validation_duration_seconds": None,
         "final_response": None,
         "error": None,
+        "failure_stage": None,
+        "scope_report_path": str(scope_report),
+        "diagnostic_path": None,
+        "builder_item_summary_path": None,
     }
+    logger.info(
+        "Starting crawler source attempt",
+        extra={"event": "factory_source_started", **context},
+    )
     command = [
         sys.executable,
         str(workspace / "build_crawlers_with_codex.py"),
@@ -451,6 +579,7 @@ def attempt_source(
             )
             unit = "minute" if timeout_minutes == 1 else "minutes"
             result["generation_warning"] = f"builder exceeded {timeout_minutes} {unit}"
+            builder_exit_code = None
         else:
             (run_dir / f"{source['id']}-{slug}-builder.log").write_text(
                 generation.stdout + generation.stderr,
@@ -460,8 +589,36 @@ def attempt_source(
                 result["generation_warning"] = (
                     f"builder exited with status {generation.returncode}"
                 )
+            builder_exit_code = generation.returncode
+        read_builder_report(builder_report, builder_items, result)
+        logger.info(
+            "Crawler builder completed",
+            extra={
+                "event": "factory_source_builder_completed",
+                **context,
+                "builder_exit_code": builder_exit_code,
+                "warning": result["generation_warning"],
+            },
+        )
         initial_directory = directory
+        stage = "scope_validation"
+        removed_paths = cleanup_untracked_scope_artifacts(
+            workspace,
+            initial_directory,
+            scope_report,
+        )
+        if removed_paths:
+            logger.warning(
+                "Removed untracked files outside crawler scope",
+                extra={
+                    "event": "factory_source_scope_cleanup",
+                    **context,
+                    "removed_paths": removed_paths,
+                    "scope_report_path": str(scope_report),
+                },
+            )
         validate_change_scope(workspace, initial_directory)
+        stage = "geography_resolution"
         geographic_scope, country_code = generated_geography(workspace / directory)
         final_directory = resolved_crawler_directory(
             directory.name,
@@ -473,6 +630,8 @@ def attempt_source(
         result["crawler_directory"] = str(directory)
         result["geographic_scope"] = geographic_scope
         result["country_code"] = country_code
+        context["crawler_directory"] = str(directory)
+        stage = "scope_validation"
         validate_change_scope(workspace, directory, initial_directory)
         if identity_resolver:
             source = identity_resolver(
@@ -494,22 +653,11 @@ def attempt_source(
         )
         output_path = workspace / directory
         blocked = (output_path / "BLOCKED.md").exists()
-        if builder_report.exists():
-            try:
-                builder_data = json.loads(builder_report.read_text(encoding="utf-8"))
-                if builder_data:
-                    result["final_response"] = builder_data[-1].get("final_response")
-            except (json.JSONDecodeError, OSError, TypeError, AttributeError) as exc:
-                warning = f"builder report could not be read: {type(exc).__name__}"
-                result["generation_warning"] = (
-                    f"{result['generation_warning']}; {warning}"
-                    if result["generation_warning"]
-                    else warning
-                )
         if blocked:
             result["status"] = "blocked"
             result["validation_status"] = "not_applicable"
         else:
+            stage = "live_validation"
             validation = validate_generated_crawler(
                 workspace,
                 run_dir,
@@ -521,10 +669,21 @@ def attempt_source(
             result["validation_status"] = validation.get("status")
             result["validation_record_count"] = validation.get("record_count")
             result["validation_duration_seconds"] = validation.get("duration_seconds")
+            logger.info(
+                "Crawler source validation completed",
+                extra={
+                    "event": "factory_source_validation_completed",
+                    **context,
+                    "validation_status": result["validation_status"],
+                    "record_count": result["validation_record_count"],
+                    "duration_seconds": result["validation_duration_seconds"],
+                },
+            )
             if validation.get("status") != "passed":
                 result["error"] = validation_error(validation)
                 return result
             result["status"] = "generated"
+        stage = "commit"
         result["commit"] = git_commit(workspace, source, result["status"])
         return result
     except Exception as exc:
@@ -532,6 +691,46 @@ def attempt_source(
         return result
     finally:
         result["duration_seconds"] = round(time.monotonic() - started, 2)
+        if result["status"] not in {"generated", "blocked", "duplicate"}:
+            result["failure_stage"] = stage
+            try:
+                result["diagnostic_path"] = str(
+                    persist_failure_diagnostics(workspace, run_dir, source, directory)
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not preserve crawler failure diagnostics",
+                    extra={
+                        "event": "factory_source_diagnostics_failed",
+                        **context,
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc)[:1000],
+                    },
+                )
+            logger.error(
+                "Crawler source attempt failed",
+                extra={
+                    "event": "factory_source_failed",
+                    **context,
+                    "status": result["status"],
+                    "stage": stage,
+                    "duration_seconds": result["duration_seconds"],
+                    "warning": result["generation_warning"],
+                    "error_message": (result["error"] or "unknown error")[:2000],
+                    "diagnostic_path": result["diagnostic_path"],
+                },
+            )
+        else:
+            logger.info(
+                "Crawler source attempt completed",
+                extra={
+                    "event": "factory_source_completed",
+                    **context,
+                    "status": result["status"],
+                    "duration_seconds": result["duration_seconds"],
+                    "warning": result["generation_warning"],
+                },
+            )
 
 
 def reset_failed_attempt(workspace: Path) -> None:
@@ -594,8 +793,8 @@ def reconcile_pull_requests(registry: CrawlerRegistry, workspace: Path) -> dict[
 
 def pr_body(results: list[dict], model: str, run_id: str) -> str:
     rows = [
-        "| Source | URL | Result | Validation | Warning | Directory |",
-        "|---|---|---|---|---|---|",
+        "| Source | URL | Result | Validation | Warning | Failure | Directory |",
+        "|---|---|---|---|---|---|---|",
     ]
     for result in results:
         validation = result.get("validation_status") or "not run"
@@ -604,9 +803,11 @@ def pr_body(results: list[dict], model: str, run_id: str) -> str:
                 f"passed ({result.get('validation_record_count')} records, "
                 f"{result.get('validation_duration_seconds')}s)"
             )
+        warning = str(result.get("generation_warning") or "none").replace("|", "\\|").replace("\n", " ")[:500]
+        failure = str(result.get("error") or "none").replace("|", "\\|").replace("\n", " ")[:500]
         rows.append(
             f"| {result['source_id']} | {result['url']} | {result['status']} | {validation} | "
-            f"{result.get('generation_warning') or 'none'} | "
+            f"{warning} | {failure} | "
             f"`{result['crawler_directory']}` |"
         )
     sections = [
@@ -775,6 +976,19 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
                     crawler_path=assigned_path,
                 )
                 results.append(result)
+                logger.info(
+                    "Crawler source attempt completed as duplicate",
+                    extra={
+                        "event": "factory_source_completed",
+                        "run_id": run_id,
+                        "attempt_id": attempt_id,
+                        "source_id": source["id"],
+                        "url": source["canonical_url"],
+                        "crawler_directory": assigned_path,
+                        "status": "duplicate",
+                        "duration_seconds": 0,
+                    },
+                )
                 continue
             result = attempt_source(
                 workspace,
@@ -793,6 +1007,8 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
                         geographic_scope=scope,
                     )
                 ),
+                run_id=run_id,
+                attempt_id=attempt_id,
             )
             result["resolved_url"] = resolved_url
             results.append(result)
@@ -813,6 +1029,23 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
 
         report_path = run_dir / "batch-report.json"
         report_path.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+        status_counts = {
+            status: sum(result["status"] == status for result in results)
+            for status in {result["status"] for result in results}
+        }
+        logger.info(
+            "Crawler factory batch attempts completed",
+            extra={
+                "event": "factory_batch_attempts_completed",
+                "run_id": run_id,
+                "attempt_count": len(results),
+                "generated_count": status_counts.get("generated", 0),
+                "blocked_count": status_counts.get("blocked", 0),
+                "failed_count": status_counts.get("generation_failed", 0),
+                "duplicate_count": status_counts.get("duplicate", 0),
+                "report_path": str(report_path),
+            },
+        )
         if not successful_source_ids:
             registry.finish_run(run_id, "no_changes")
             logger.info(
