@@ -137,6 +137,21 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             ),
         )
 
+    def test_automatic_selection_has_no_default_batch_limit(self):
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = []
+
+        analyzer.select_concerts(
+            conn,
+            concert_ids=None,
+            limit=analyzer.DEFAULT_LIMIT,
+            force=False,
+        )
+
+        self.assertIsNone(analyzer.DEFAULT_LIMIT)
+        self.assertIsNone(cursor.execute.call_args.args[1][-1])
+
     def test_composer_only_requires_composers_and_no_program(self):
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
         result = {
@@ -769,12 +784,19 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             with patch.dict(os.environ, {"CODEX_HOME": directory}):
                 asyncio.run(analyzer.validate_model(codex, "gpt-5.6-terra"))
 
-    def test_concurrency_defaults_to_four_and_honors_cli_then_environment(self):
+    def test_concurrency_defaults_to_sixty_four_and_honors_cli_then_environment(self):
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(analyzer.resolve_concurrency(), 4)
+            self.assertEqual(analyzer.resolve_concurrency(), 64)
         with patch.dict(os.environ, {"CONCERT_PROGRAM_CONCURRENCY": "7"}):
             self.assertEqual(analyzer.resolve_concurrency(), 7)
             self.assertEqual(analyzer.resolve_concurrency(2), 2)
+
+    def test_cli_defaults_to_all_eligible_concerts(self):
+        with patch("sys.argv", ["analyze_concert_programs"]):
+            args = analyzer.parse_args()
+
+        self.assertIsNone(args.limit)
+        self.assertIsNone(args.concurrency)
 
     def test_concurrency_rejects_invalid_values(self):
         for value in (0, -1, "many"):

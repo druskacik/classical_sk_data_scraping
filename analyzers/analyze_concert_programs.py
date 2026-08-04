@@ -27,8 +27,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gpt-5.6-luna"
-DEFAULT_LIMIT = 200
-DEFAULT_CONCURRENCY = 4
+DEFAULT_LIMIT: int | None = None
+DEFAULT_CONCURRENCY = 64
 DEFAULT_TIMEOUT_SECONDS = 600
 MAX_AUTOMATIC_ATTEMPTS = 3
 NO_PROGRAM_RETRY_INTERVAL_DAYS = 7
@@ -223,7 +223,13 @@ def render_prompt(concert: Concert) -> str:
     )
 
 
-def select_concerts(conn, concert_ids: list[int] | None, limit: int, force: bool, unresolved_locations: bool = False) -> list[Concert]:
+def select_concerts(
+    conn,
+    concert_ids: list[int] | None,
+    limit: int | None,
+    force: bool,
+    unresolved_locations: bool = False,
+) -> list[Concert]:
     columns = """c.id, c.title, c.date, c.url, c.description,
                  c.time_from, c.time_to, c.city_raw, c.country_code_raw, c.venue,
                  c.event_status, c.source, c.city_id, city.english_name,
@@ -1110,7 +1116,7 @@ async def run_concerts(
 def run(
     *,
     concert_ids: list[int] | None = None,
-    limit: int = DEFAULT_LIMIT,
+    limit: int | None = DEFAULT_LIMIT,
     concurrency: int = DEFAULT_CONCURRENCY,
     model: str = DEFAULT_MODEL,
     commit: bool = False,
@@ -1160,7 +1166,12 @@ def scheduled_main() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract composers and works with Codex.")
     parser.add_argument("--concert-id", type=int, action="append", dest="concert_ids")
-    parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_LIMIT,
+        help="Maximum concerts to analyze (default: all currently eligible concerts)",
+    )
     parser.add_argument(
         "--concurrency",
         type=int,
