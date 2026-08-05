@@ -30,6 +30,9 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_LIMIT: int | None = None
 DEFAULT_CONCURRENCY = 16
 DEFAULT_TIMEOUT_SECONDS = 1800
+POSTGRES_KEEPALIVES_IDLE_SECONDS = 60
+POSTGRES_KEEPALIVES_INTERVAL_SECONDS = 20
+POSTGRES_KEEPALIVES_COUNT = 3
 MAX_AUTOMATIC_ATTEMPTS = 3
 NO_PROGRAM_RETRY_INTERVAL_DAYS = 7
 ADVISORY_LOCK_NAME = "classical-sk-concert-program-analysis"
@@ -231,6 +234,10 @@ def get_connection():
         password=os.getenv("DB_PASS"),
         host=os.getenv("DB_HOST"),
         port=os.getenv("DB_PORT"),
+        keepalives=1,
+        keepalives_idle=POSTGRES_KEEPALIVES_IDLE_SECONDS,
+        keepalives_interval=POSTGRES_KEEPALIVES_INTERVAL_SECONDS,
+        keepalives_count=POSTGRES_KEEPALIVES_COUNT,
     )
 
 

@@ -41,6 +41,32 @@ def no_program_group_result(concerts):
 
 
 class AnalyzeConcertProgramsTests(unittest.TestCase):
+    @patch.object(analyzer.psycopg2, "connect")
+    def test_database_connections_detect_disappeared_clients_quickly(self, connect):
+        with patch.dict(
+            os.environ,
+            {
+                "DB_NAME": "classical",
+                "DB_USER": "bot",
+                "DB_PASS": "secret",
+                "DB_HOST": "postgres",
+                "DB_PORT": "5432",
+            },
+        ):
+            analyzer.get_connection()
+
+        connect.assert_called_once_with(
+            dbname="classical",
+            user="bot",
+            password="secret",
+            host="postgres",
+            port="5432",
+            keepalives=1,
+            keepalives_idle=60,
+            keepalives_interval=20,
+            keepalives_count=3,
+        )
+
     def test_normalize_handles_diacritics_and_punctuation(self):
         self.assertEqual(normalize("  Antonín DVOŘÁK — op. 95 "), "antonin dvorak op 95")
 
