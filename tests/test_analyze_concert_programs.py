@@ -784,9 +784,9 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             with patch.dict(os.environ, {"CODEX_HOME": directory}):
                 asyncio.run(analyzer.validate_model(codex, "gpt-5.6-terra"))
 
-    def test_concurrency_defaults_to_sixty_four_and_honors_cli_then_environment(self):
+    def test_concurrency_defaults_to_sixteen_and_honors_cli_then_environment(self):
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(analyzer.resolve_concurrency(), 64)
+            self.assertEqual(analyzer.resolve_concurrency(), 16)
         with patch.dict(os.environ, {"CONCERT_PROGRAM_CONCURRENCY": "7"}):
             self.assertEqual(analyzer.resolve_concurrency(), 7)
             self.assertEqual(analyzer.resolve_concurrency(2), 2)
