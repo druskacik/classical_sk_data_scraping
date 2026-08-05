@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_LIMIT: int | None = None
 DEFAULT_CONCURRENCY = 16
-DEFAULT_TIMEOUT_SECONDS = 600
+DEFAULT_TIMEOUT_SECONDS = 1800
 MAX_AUTOMATIC_ATTEMPTS = 3
 NO_PROGRAM_RETRY_INTERVAL_DAYS = 7
 ADVISORY_LOCK_NAME = "classical-sk-concert-program-analysis"
@@ -43,121 +43,157 @@ EVENT_UPDATE_FIELDS = (
 )
 EVENT_STATUSES = ("scheduled", "cancelled", "postponed", "rescheduled")
 
+PROGRAMME_RESULT_PROPERTIES: dict[str, Any] = {
+    "status": {
+        "type": "string",
+        "enum": [
+            "complete",
+            "partial",
+            "composer_only",
+            "ambiguous",
+            "no_program",
+            "page_unavailable",
+        ],
+    },
+    "notes": {"type": "string"},
+    "composers": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "existing_id": {"type": ["integer", "null"]},
+                "name": {"type": "string"},
+            },
+            "required": ["existing_id", "name"],
+        },
+    },
+    "program": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "composer": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "existing_id": {"type": ["integer", "null"]},
+                        "name": {"type": "string"},
+                    },
+                    "required": ["existing_id", "name"],
+                },
+                "work": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "existing_id": {"type": ["integer", "null"]},
+                        "title": {"type": "string"},
+                        "catalogue_number": {"type": ["string", "null"]},
+                    },
+                    "required": ["existing_id", "title", "catalogue_number"],
+                },
+                "programme_label": {"type": "string"},
+                "evidence": {"type": "string"},
+            },
+            "required": ["composer", "work", "programme_label", "evidence"],
+        },
+    },
+    "unresolved_program": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "programme_label": {"type": "string"},
+                "evidence": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["programme_label", "evidence", "reason"],
+        },
+    },
+}
+
+EVENT_UPDATES_SCHEMA: dict[str, Any] = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "field": {"type": "string", "enum": list(EVENT_UPDATE_FIELDS)},
+            "new_value": {"type": "string"},
+            "source_url": {"type": "string"},
+            "evidence": {"type": "string"},
+        },
+        "required": ["field", "new_value", "source_url", "evidence"],
+    },
+}
+
+LOCATION_RESOLUTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "status": {"type": "string", "enum": ["not_needed", "existing_city", "new_city", "country_only", "ambiguous", "invalid", "insufficient_evidence"]},
+        "existing_city_id": {"type": ["integer", "null"]},
+        "english_name": {"type": ["string", "null"]},
+        "local_name": {"type": ["string", "null"]},
+        "country_code": {"type": ["string", "null"]},
+        "external_source": {"type": ["string", "null"]},
+        "external_id": {"type": ["string", "null"]},
+        "raw_value_type": {"type": ["string", "null"], "enum": ["legitimate_name", "postal_or_address", "extraction_artifact", "ambiguous", "invalid", None]},
+        "source_url": {"type": "string"},
+        "evidence": {"type": "string"},
+    },
+    "required": ["status", "existing_city_id", "english_name", "local_name", "country_code", "external_source", "external_id", "raw_value_type", "source_url", "evidence"],
+}
+
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
-        "status": {
-            "type": "string",
-            "enum": [
-                "complete",
-                "partial",
-                "composer_only",
-                "ambiguous",
-                "no_program",
-                "page_unavailable",
-            ],
-        },
-        "source_url": {"type": "string"},
-        "notes": {"type": "string"},
-        "composers": {
+        "programme_groups": {
             "type": "array",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "existing_id": {"type": ["integer", "null"]},
-                    "name": {"type": "string"},
-                },
-                "required": ["existing_id", "name"],
-            },
-        },
-        "program": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "composer": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "existing_id": {"type": ["integer", "null"]},
-                            "name": {"type": "string"},
-                        },
-                        "required": ["existing_id", "name"],
+                    "concert_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
                     },
-                    "work": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "existing_id": {"type": ["integer", "null"]},
-                            "title": {"type": "string"},
-                            "catalogue_number": {"type": ["string", "null"]},
-                        },
-                        "required": ["existing_id", "title", "catalogue_number"],
-                    },
-                    "programme_label": {"type": "string"},
-                    "evidence": {"type": "string"},
+                    **PROGRAMME_RESULT_PROPERTIES,
                 },
-                "required": ["composer", "work", "programme_label", "evidence"],
+                "required": [
+                    "concert_ids",
+                    "status",
+                    "notes",
+                    "composers",
+                    "program",
+                    "unresolved_program",
+                ],
             },
         },
-        "unresolved_program": {
+        "concert_results": {
             "type": "array",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "programme_label": {"type": "string"},
-                    "evidence": {"type": "string"},
-                    "reason": {"type": "string"},
-                },
-                "required": ["programme_label", "evidence", "reason"],
-            },
-        },
-        "event_updates": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "field": {"type": "string", "enum": list(EVENT_UPDATE_FIELDS)},
-                    "new_value": {"type": "string"},
+                    "concert_id": {"type": "integer"},
                     "source_url": {"type": "string"},
-                    "evidence": {"type": "string"},
+                    "event_updates": EVENT_UPDATES_SCHEMA,
+                    "location_resolution": LOCATION_RESOLUTION_SCHEMA,
                 },
-                "required": ["field", "new_value", "source_url", "evidence"],
+                "required": [
+                    "concert_id",
+                    "source_url",
+                    "event_updates",
+                    "location_resolution",
+                ],
             },
-        },
-        "location_resolution": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "status": {"type": "string", "enum": ["not_needed", "existing_city", "new_city", "country_only", "ambiguous", "invalid", "insufficient_evidence"]},
-                "existing_city_id": {"type": ["integer", "null"]},
-                "english_name": {"type": ["string", "null"]},
-                "local_name": {"type": ["string", "null"]},
-                "country_code": {"type": ["string", "null"]},
-                "external_source": {"type": ["string", "null"]},
-                "external_id": {"type": ["string", "null"]},
-                "raw_value_type": {"type": ["string", "null"], "enum": ["legitimate_name", "postal_or_address", "extraction_artifact", "ambiguous", "invalid", None]},
-                "source_url": {"type": "string"},
-                "evidence": {"type": "string"},
-            },
-            "required": ["status", "existing_city_id", "english_name", "local_name", "country_code", "external_source", "external_id", "raw_value_type", "source_url", "evidence"],
         },
     },
-    "required": [
-        "status",
-        "source_url",
-        "notes",
-        "composers",
-        "program",
-        "unresolved_program",
-        "event_updates",
-        "location_resolution",
-    ],
+    "required": ["programme_groups", "concert_results"],
 }
 
 
@@ -179,6 +215,13 @@ class Concert:
     city_english_name: str | None = None
     city_local_name: str | None = None
     country_code_resolved: str | None = None
+    source_url: str | None = None
+
+
+@dataclass(frozen=True)
+class ConcertGroup:
+    key: tuple[str, str, str]
+    concerts: tuple[Concert, ...]
 
 
 def get_connection():
@@ -191,34 +234,65 @@ def get_connection():
     )
 
 
-def render_prompt(concert: Concert) -> str:
+def group_concerts(concerts: list[Concert]) -> list[ConcertGroup]:
+    grouped: dict[tuple[str, str, str], list[Concert]] = {}
+    for concert in concerts:
+        normalized_title = normalize(concert.title)
+        if not concert.source or not normalized_title or not concert.source_url:
+            key = (f"__singleton__:{concert.id}", normalized_title, "")
+        else:
+            key = (concert.source, normalized_title, concert.source_url)
+        grouped.setdefault(key, []).append(concert)
+    return [ConcertGroup(key, tuple(items)) for key, items in grouped.items()]
+
+
+def render_prompt(group: ConcertGroup) -> str:
     template = PROMPT_PATH.read_text(encoding="utf-8")
+    description_labels: dict[str, str] = {}
+    descriptions = []
+    occurrences = []
+    for concert in group.concerts:
+        description = concert.description or "(not available)"
+        if description not in description_labels:
+            label = f"D{len(description_labels) + 1}"
+            description_labels[description] = label
+            descriptions.append({"label": label, "text": description})
+        occurrences.append(
+            {
+                "id": concert.id,
+                "title": concert.title,
+                "date": concert.date.isoformat(),
+                "url": concert.url,
+                "description_label": description_labels[description],
+                "time_from": (
+                    concert.time_from.isoformat(timespec="minutes")
+                    if concert.time_from
+                    else "(not available)"
+                ),
+                "time_to": (
+                    concert.time_to.isoformat(timespec="minutes")
+                    if concert.time_to
+                    else "(not available)"
+                ),
+                "city_raw": concert.city_raw or "(not available)",
+                "country_code_raw": concert.country_code_raw or "(not available)",
+                "city_id": concert.city_id or "(unresolved)",
+                "city_english_name": concert.city_english_name or "(unresolved)",
+                "city_local_name": concert.city_local_name or "(unresolved)",
+                "country_code_resolved": concert.country_code_resolved or "(unresolved)",
+                "venue": concert.venue or "(not available)",
+                "event_status": concert.event_status,
+            }
+        )
     return pystache.render(
         template,
         {
-            "id": concert.id,
-            "title": concert.title,
-            "date": concert.date.isoformat(),
-            "url": concert.url,
-            "description": concert.description or "(not available)",
-            "time_from": (
-                concert.time_from.isoformat(timespec="minutes")
-                if concert.time_from
-                else "(not available)"
-            ),
-            "time_to": (
-                concert.time_to.isoformat(timespec="minutes")
-                if concert.time_to
-                else "(not available)"
-            ),
-            "city_raw": concert.city_raw or "(not available)",
-            "country_code_raw": concert.country_code_raw or "(not available)",
-            "city_id": concert.city_id or "(unresolved)",
-            "city_english_name": concert.city_english_name or "(unresolved)",
-            "city_local_name": concert.city_local_name or "(unresolved)",
-            "country_code_resolved": concert.country_code_resolved or "(unresolved)",
-            "venue": concert.venue or "(not available)",
-            "event_status": concert.event_status,
+            "source": group.concerts[0].source or "(not available)",
+            "normalized_title": group.key[1],
+            "grouping_source_url": group.concerts[0].source_url or "(not available)",
+            "concert_count": len(group.concerts),
+            "descriptions": descriptions,
+            "occurrences": occurrences,
         },
     )
 
@@ -233,7 +307,7 @@ def select_concerts(
     columns = """c.id, c.title, c.date, c.url, c.description,
                  c.time_from, c.time_to, c.city_raw, c.country_code_raw, c.venue,
                  c.event_status, c.source, c.city_id, city.english_name,
-                 city.local_name, c.country_code_resolved"""
+                 city.local_name, c.country_code_resolved, c.source_url"""
     with conn.cursor() as cursor:
         if concert_ids:
             cursor.execute(
@@ -343,7 +417,7 @@ async def validate_model(codex: AsyncCodex, model: str) -> None:
 
 async def run_agent(
     codex: AsyncCodex,
-    concert: Concert,
+    group: ConcertGroup,
     model: str,
     timeout_seconds: int,
 ) -> dict[str, Any]:
@@ -355,7 +429,7 @@ async def run_agent(
         sandbox=Sandbox.full_access,
     )
     turn = await thread.turn(
-        render_prompt(concert),
+        render_prompt(group),
         approval_mode=ApprovalMode.deny_all,
         cwd=str(Path.cwd()),
         model=model,
@@ -370,16 +444,78 @@ async def run_agent(
         except Exception:
             logger.exception(
                 "Could not interrupt timed-out Codex turn",
-                extra={"event": "programme_analysis_interrupt_failed", "concert_id": concert.id},
+                extra={
+                    "event": "programme_analysis_interrupt_failed",
+                    "concert_ids": [concert.id for concert in group.concerts],
+                },
             )
         raise TimeoutError(
-            f"Concert programme analysis exceeded {timeout_seconds} seconds"
+            f"Concert group programme analysis exceeded {timeout_seconds} seconds"
         )
     if result.error:
         raise RuntimeError(str(result.error))
     if not result.final_response:
         raise RuntimeError("Codex returned no final response")
     return json.loads(result.final_response)
+
+
+def expand_group_result(
+    group: ConcertGroup,
+    result: dict[str, Any],
+) -> list[tuple[Concert, dict[str, Any]]]:
+    expected_ids = {concert.id for concert in group.concerts}
+    programme_by_id: dict[int, dict[str, Any]] = {}
+    for programme_group in result["programme_groups"]:
+        concert_ids = programme_group["concert_ids"]
+        if not concert_ids:
+            raise ValueError("Programme groups must not be empty")
+        for concert_id in concert_ids:
+            if concert_id not in expected_ids:
+                raise ValueError(f"Unknown concert ID {concert_id} in programme groups")
+            if concert_id in programme_by_id:
+                raise ValueError(f"Duplicate concert ID {concert_id} in programme groups")
+            programme_by_id[concert_id] = programme_group
+
+    occurrence_by_id: dict[int, dict[str, Any]] = {}
+    for occurrence in result["concert_results"]:
+        concert_id = occurrence["concert_id"]
+        if concert_id not in expected_ids:
+            raise ValueError(f"Unknown concert ID {concert_id} in concert results")
+        if concert_id in occurrence_by_id:
+            raise ValueError(f"Duplicate concert ID {concert_id} in concert results")
+        occurrence_by_id[concert_id] = occurrence
+
+    missing_programmes = expected_ids - programme_by_id.keys()
+    missing_occurrences = expected_ids - occurrence_by_id.keys()
+    if missing_programmes:
+        raise ValueError(
+            f"Missing programme results for concert IDs {sorted(missing_programmes)}"
+        )
+    if missing_occurrences:
+        raise ValueError(
+            f"Missing occurrence results for concert IDs {sorted(missing_occurrences)}"
+        )
+
+    expanded = []
+    for concert in group.concerts:
+        programme = programme_by_id[concert.id]
+        occurrence = occurrence_by_id[concert.id]
+        expanded.append(
+            (
+                concert,
+                {
+                    "status": programme["status"],
+                    "source_url": occurrence["source_url"],
+                    "notes": programme["notes"],
+                    "composers": programme["composers"],
+                    "program": programme["program"],
+                    "unresolved_program": programme["unresolved_program"],
+                    "event_updates": occurrence["event_updates"],
+                    "location_resolution": occurrence["location_resolution"],
+                },
+            )
+        )
+    return expanded
 
 
 def validate_result(conn, concert: Concert, result: dict[str, Any]) -> None:
@@ -993,23 +1129,91 @@ def persist_concert_error(concert: Concert, model: str, error: Exception) -> Non
         conn.close()
 
 
-async def analyze_concert(
+async def analyze_concert_group(
     codex: AsyncCodex,
     semaphore: asyncio.Semaphore,
-    concert: Concert,
+    group: ConcertGroup,
     model: str,
     commit: bool,
     timeout_seconds: int,
-) -> bool:
+) -> int:
     async with semaphore:
         started_at = monotonic()
+        concert_ids = [concert.id for concert in group.concerts]
         logger.info(
-            "Analyzing concert programme",
-            extra={"event": "programme_analysis_started", "concert_id": concert.id},
+            "Analyzing candidate concert programme group",
+            extra={
+                "event": "programme_analysis_group_started",
+                "concert_ids": concert_ids,
+                "group_size": len(group.concerts),
+                "group_source": group.concerts[0].source,
+                "group_title": group.key[1],
+                "group_source_url": group.concerts[0].source_url,
+            },
         )
         try:
-            result = await run_agent(codex, concert, model, timeout_seconds)
-            validate_and_persist_result(concert, result, model, commit)
+            group_result = await run_agent(codex, group, model, timeout_seconds)
+            expanded = expand_group_result(group, group_result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.exception(
+                "Candidate concert programme group failed",
+                extra={
+                    "event": "programme_analysis_group_failed",
+                    "concert_ids": concert_ids,
+                    "group_size": len(group.concerts),
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                    "duration_seconds": round(monotonic() - started_at, 3),
+                },
+            )
+            if commit:
+                for concert in group.concerts:
+                    try:
+                        persist_concert_error(concert, model, error)
+                    except Exception as persistence_error:
+                        logger.exception(
+                            "Could not persist concert programme analysis failure",
+                            extra={
+                                "event": "programme_analysis_error_persistence_failed",
+                                "concert_id": concert.id,
+                                "error_type": type(persistence_error).__name__,
+                                "error_message": str(persistence_error),
+                            },
+                        )
+            return len(group.concerts)
+
+        failures = 0
+        subgroup_count = len(group_result["programme_groups"])
+        for concert, result in expanded:
+            try:
+                validate_and_persist_result(concert, result, model, commit)
+            except Exception as error:
+                failures += 1
+                logger.exception(
+                    "Concert result from candidate group failed",
+                    extra={
+                        "event": "programme_analysis_failed",
+                        "concert_id": concert.id,
+                        "error_type": type(error).__name__,
+                        "error_message": str(error),
+                    },
+                )
+                if commit:
+                    try:
+                        persist_concert_error(concert, model, error)
+                    except Exception as persistence_error:
+                        logger.exception(
+                            "Could not persist concert programme analysis failure",
+                            extra={
+                                "event": "programme_analysis_error_persistence_failed",
+                                "concert_id": concert.id,
+                                "error_type": type(persistence_error).__name__,
+                                "error_message": str(persistence_error),
+                            },
+                        )
+                continue
             logger.info(
                 "Concert programme analysis completed",
                 extra={
@@ -1031,38 +1235,24 @@ async def analyze_concert(
                         "concert_id": concert.id,
                     },
                 )
-            return False
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            logger.exception(
-                "Concert programme analysis failed",
-                extra={
-                    "event": "programme_analysis_failed",
-                    "concert_id": concert.id,
-                    "error_type": type(error).__name__,
-                    "error_message": str(error),
-                    "duration_seconds": round(monotonic() - started_at, 3),
-                },
-            )
-            if commit:
-                try:
-                    persist_concert_error(concert, model, error)
-                except Exception as persistence_error:
-                    logger.exception(
-                        "Could not persist concert programme analysis failure",
-                        extra={
-                            "event": "programme_analysis_error_persistence_failed",
-                            "concert_id": concert.id,
-                            "error_type": type(persistence_error).__name__,
-                            "error_message": str(persistence_error),
-                        },
-                    )
-            return True
+        logger.info(
+            "Candidate concert programme group completed",
+            extra={
+                "event": "programme_analysis_group_completed",
+                "concert_ids": concert_ids,
+                "group_size": len(group.concerts),
+                "subgroup_count": subgroup_count,
+                "completed_count": len(group.concerts) - failures,
+                "failure_count": failures,
+                "commit": commit,
+                "duration_seconds": round(monotonic() - started_at, 3),
+            },
+        )
+        return failures
 
 
-async def run_concerts(
-    concerts: list[Concert],
+async def run_concert_groups(
+    groups: list[ConcertGroup],
     *,
     model: str,
     commit: bool,
@@ -1074,7 +1264,8 @@ async def run_concerts(
         "Starting concert programme analysis batch",
         extra={
             "event": "programme_analysis_batch_started",
-            "selected_count": len(concerts),
+            "selected_count": sum(len(group.concerts) for group in groups),
+            "group_count": len(groups),
             "concurrency": concurrency,
             "commit": commit,
         },
@@ -1086,24 +1277,26 @@ async def run_concerts(
         await validate_model(codex, model)
         results = await asyncio.gather(
             *(
-                analyze_concert(
+                analyze_concert_group(
                     codex,
                     semaphore,
-                    concert,
+                    group,
                     model,
                     commit,
                     timeout_seconds,
                 )
-                for concert in concerts
+                for group in groups
             )
         )
     failures = sum(results)
+    selected_count = sum(len(group.concerts) for group in groups)
     logger.info(
         "Concert programme analysis batch completed",
         extra={
             "event": "programme_analysis_batch_completed",
-            "selected_count": len(concerts),
-            "completed_count": len(concerts) - failures,
+            "selected_count": selected_count,
+            "group_count": len(groups),
+            "completed_count": selected_count - failures,
             "failure_count": failures,
             "concurrency": concurrency,
             "commit": commit,
@@ -1141,9 +1334,10 @@ def run(
                 extra={"event": "programme_queue_empty"},
             )
             return 0
+        groups = group_concerts(concerts)
         return asyncio.run(
-            run_concerts(
-                concerts,
+            run_concert_groups(
+                groups,
                 model=model,
                 commit=commit,
                 timeout_seconds=timeout_seconds,
@@ -1176,7 +1370,7 @@ def parse_args() -> argparse.Namespace:
         "--concurrency",
         type=int,
         help=(
-            "Maximum simultaneous analyses "
+            "Maximum simultaneous candidate-group analyses "
             f"(default: CONCERT_PROGRAM_CONCURRENCY or {DEFAULT_CONCURRENCY})"
         ),
     )

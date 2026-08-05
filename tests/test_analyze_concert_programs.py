@@ -12,14 +12,44 @@ from agent_utils.concert_catalog import normalize
 from analyzers import analyze_concert_programs as analyzer
 
 
+def not_needed_location():
+    return {
+        "status": "not_needed", "existing_city_id": None,
+        "english_name": None, "local_name": None, "country_code": None,
+        "external_source": None, "external_id": None, "raw_value_type": None,
+        "source_url": "", "evidence": "",
+    }
+
+
+def no_program_group_result(concerts):
+    return {
+        "programme_groups": [{
+            "concert_ids": [concert.id for concert in concerts],
+            "status": "no_program",
+            "notes": "No programme published.",
+            "composers": [],
+            "program": [],
+            "unresolved_program": [],
+        }],
+        "concert_results": [{
+            "concert_id": concert.id,
+            "source_url": concert.url,
+            "event_updates": [],
+            "location_resolution": not_needed_location(),
+        } for concert in concerts],
+    }
+
+
 class AnalyzeConcertProgramsTests(unittest.TestCase):
     def test_normalize_handles_diacritics_and_punctuation(self):
         self.assertEqual(normalize("  Antonín DVOŘÁK — op. 95 "), "antonin dvorak op 95")
 
     def test_prompt_requires_live_url_before_description(self):
-        prompt = analyzer.render_prompt(
-            analyzer.Concert(7, "Test", date(2026, 8, 1), "https://example.test/event", "fallback")
+        concert = analyzer.Concert(
+            7, "Test", date(2026, 8, 1), "https://example.test/event", "fallback",
+            source="Example", source_url="https://example.test",
         )
+        prompt = analyzer.render_prompt(analyzer.group_concerts([concert])[0])
         self.assertIn("Always try to open and inspect the live URL first", prompt)
         self.assertIn("fallback context", prompt)
         self.assertIn(
@@ -41,7 +71,100 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             prompt.index("Your primary task is the composer and work extraction"),
             prompt.index("As a secondary best-effort task"),
         )
-        self.assertLess(prompt.index("URL: https://example.test/event"), prompt.index("fallback"))
+        self.assertIn("Event URL: https://example.test/event", prompt)
+        self.assertIn("partition the supplied concert IDs", prompt)
+
+    def test_groups_by_source_normalized_title_and_source_url_without_size_cap(self):
+        concerts = [
+            analyzer.Concert(
+                index,
+                "Vivaldi — Four Seasons" if index % 2 else "vivaldi four seasons",
+                date.today(),
+                f"https://example.test/event/{index}",
+                "Same programme",
+                source="Example",
+                source_url="https://example.test/series",
+            )
+            for index in range(1, 121)
+        ]
+
+        groups = analyzer.group_concerts(concerts)
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(len(groups[0].concerts), 120)
+        prompt = analyzer.render_prompt(groups[0])
+        self.assertEqual(prompt.count("Same programme"), 1)
+        self.assertEqual(prompt.count("Concert ID:"), 120)
+
+    def test_grouping_separates_sources_urls_and_missing_keys(self):
+        base = dict(
+            title="Test!", date=date.today(), description=None,
+            source="Example", source_url="https://example.test/series",
+        )
+        concerts = [
+            analyzer.Concert(1, url="https://example.test/1", **base),
+            analyzer.Concert(2, url="https://example.test/2", **{**base, "title": "test"}),
+            analyzer.Concert(3, url="https://example.test/3", **{**base, "source": "Other"}),
+            analyzer.Concert(4, url="https://example.test/4", **{**base, "source_url": "https://example.test/other"}),
+            analyzer.Concert(5, url="https://example.test/5", **{**base, "source_url": None}),
+            analyzer.Concert(6, url="https://example.test/6", **{**base, "source_url": None}),
+        ]
+
+        groups = analyzer.group_concerts(concerts)
+
+        self.assertEqual([len(group.concerts) for group in groups], [2, 1, 1, 1, 1])
+
+    def test_expands_agent_partitions_to_legacy_per_concert_results(self):
+        concerts = [
+            analyzer.Concert(
+                index, "Test", date.today(), f"https://example.test/{index}", None,
+                source="Example", source_url="https://example.test/series",
+            )
+            for index in (1, 2, 3)
+        ]
+        group = analyzer.group_concerts(concerts)[0]
+        result = no_program_group_result(concerts)
+        result["programme_groups"] = [
+            {
+                "concert_ids": [1, 3], "status": "no_program", "notes": "Same",
+                "composers": [], "program": [], "unresolved_program": [],
+            },
+            {
+                "concert_ids": [2], "status": "page_unavailable", "notes": "Unavailable",
+                "composers": [], "program": [], "unresolved_program": [],
+            },
+        ]
+
+        expanded = analyzer.expand_group_result(group, result)
+
+        self.assertEqual([concert.id for concert, _ in expanded], [1, 2, 3])
+        self.assertEqual([item["status"] for _, item in expanded], ["no_program", "page_unavailable", "no_program"])
+        self.assertEqual(expanded[1][1]["source_url"], "https://example.test/2")
+
+    def test_group_result_requires_exact_id_coverage(self):
+        concerts = [
+            analyzer.Concert(
+                index, "Test", date.today(), f"https://example.test/{index}", None,
+                source="Example", source_url="https://example.test/series",
+            )
+            for index in (1, 2)
+        ]
+        group = analyzer.group_concerts(concerts)[0]
+
+        missing = no_program_group_result(concerts)
+        missing["programme_groups"][0]["concert_ids"] = [1]
+        with self.assertRaisesRegex(ValueError, "Missing programme results.*2"):
+            analyzer.expand_group_result(group, missing)
+
+        duplicate = no_program_group_result(concerts)
+        duplicate["programme_groups"].append({**duplicate["programme_groups"][0], "concert_ids": [1]})
+        with self.assertRaisesRegex(ValueError, "Duplicate concert ID 1"):
+            analyzer.expand_group_result(group, duplicate)
+
+        unknown = no_program_group_result(concerts)
+        unknown["concert_results"][1]["concert_id"] = 99
+        with self.assertRaisesRegex(ValueError, "Unknown concert ID 99"):
+            analyzer.expand_group_result(group, unknown)
 
     @patch.object(concert_catalog, "get_connection")
     def test_composer_lookup_uses_alias_and_returns_canonical_name_once(self, get_connection):
@@ -123,6 +246,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
 
         query = cursor.execute.call_args.args[0]
         self.assertIn("c.program_analysis_eligible = true", query)
+        self.assertIn("c.source_url", query)
         self.assertIn("c.date >= CURRENT_DATE", query)
         self.assertIn("a.attempts < %s", query)
         self.assertIn("make_interval(days => %s)", query)
@@ -397,20 +521,14 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         turn = thread.turn.return_value
         turn.run = AsyncMock()
         turn.run.return_value.error = None
-        turn.run.return_value.final_response = json.dumps(
-            {
-                "status": "no_program",
-                "source_url": "https://example.test",
-                "notes": "No programme published.",
-                "composers": [],
-                "program": [],
-                "unresolved_program": [],
-                "event_updates": [],
-            }
+        concert = analyzer.Concert(
+            1, "Test", date.today(), "https://example.test/event", None,
+            source="Example", source_url="https://example.test",
         )
-        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        group = analyzer.group_concerts([concert])[0]
+        turn.run.return_value.final_response = json.dumps(no_program_group_result([concert]))
 
-        asyncio.run(analyzer.run_agent(codex, concert, "gpt-5.6-terra", timeout_seconds=30))
+        asyncio.run(analyzer.run_agent(codex, group, "gpt-5.6-terra", timeout_seconds=30))
 
         self.assertIs(codex.thread_start.call_args.kwargs["ephemeral"], False)
 
@@ -418,21 +536,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         coordinator_conn = MagicMock()
         worker_conn = MagicMock()
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
-        result = {
-            "status": "complete",
-            "source_url": concert.url,
-            "notes": "",
-            "composers": [],
-            "program": [],
-            "unresolved_program": [],
-            "event_updates": [],
-            "location_resolution": {
-                "status": "not_needed", "existing_city_id": None,
-                "english_name": None, "local_name": None, "country_code": None,
-                "external_source": None, "external_id": None, "raw_value_type": None,
-                "source_url": "", "evidence": "",
-            },
-        }
+        result = no_program_group_result([concert])
         codex_class = MagicMock()
         codex_class.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
         codex_class.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -461,27 +565,27 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         worker_conn.close.assert_called_once()
 
     def test_output_schema_enforces_paired_entities(self):
-        self.assertIn("composer_only", analyzer.OUTPUT_SCHEMA["properties"]["status"]["enum"])
-        self.assertIn("partial", analyzer.OUTPUT_SCHEMA["properties"]["status"]["enum"])
-        self.assertIn("composers", analyzer.OUTPUT_SCHEMA["required"])
-        self.assertIn("unresolved_program", analyzer.OUTPUT_SCHEMA["required"])
-        self.assertIn("event_updates", analyzer.OUTPUT_SCHEMA["required"])
-        self.assertIn("location_resolution", analyzer.OUTPUT_SCHEMA["required"])
-        item = analyzer.OUTPUT_SCHEMA["properties"]["program"]["items"]
+        programme_group = analyzer.OUTPUT_SCHEMA["properties"]["programme_groups"]["items"]
+        self.assertIn("composer_only", programme_group["properties"]["status"]["enum"])
+        self.assertIn("partial", programme_group["properties"]["status"]["enum"])
+        self.assertIn("concert_ids", programme_group["required"])
+        item = programme_group["properties"]["program"]["items"]
         self.assertEqual(
             item["required"],
             ["composer", "work", "programme_label", "evidence"],
         )
-        unresolved = analyzer.OUTPUT_SCHEMA["properties"]["unresolved_program"]["items"]
+        unresolved = programme_group["properties"]["unresolved_program"]["items"]
         self.assertEqual(
             unresolved["required"],
             ["programme_label", "evidence", "reason"],
         )
-        event_update = analyzer.OUTPUT_SCHEMA["properties"]["event_updates"]["items"]
+        concert_result = analyzer.OUTPUT_SCHEMA["properties"]["concert_results"]["items"]
+        event_update = concert_result["properties"]["event_updates"]["items"]
         self.assertEqual(
             event_update["required"],
             ["field", "new_value", "source_url", "evidence"],
         )
+        self.assertIn("location_resolution", concert_result["required"])
 
     def test_validates_supported_event_updates_and_rejects_location_fields(self):
         conn = MagicMock()
@@ -791,6 +895,9 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             self.assertEqual(analyzer.resolve_concurrency(), 7)
             self.assertEqual(analyzer.resolve_concurrency(2), 2)
 
+    def test_default_group_timeout_is_thirty_minutes(self):
+        self.assertEqual(analyzer.DEFAULT_TIMEOUT_SECONDS, 1800)
+
     def test_cli_defaults_to_all_eligible_concerts(self):
         with patch("sys.argv", ["analyze_concert_programs"]):
             args = analyzer.parse_args()
@@ -806,27 +913,23 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
 
     def test_async_batch_never_exceeds_configured_concurrency(self):
         concerts = [
-            analyzer.Concert(index, f"Test {index}", date.today(), "https://example.test", None)
+            analyzer.Concert(
+                index, f"Test {index}", date.today(), f"https://example.test/{index}", None,
+                source="Example", source_url=f"https://example.test/source/{index}",
+            )
             for index in range(1, 9)
         ]
+        groups = analyzer.group_concerts(concerts)
         active = 0
         maximum_active = 0
 
-        async def agent_result(_codex, concert, _model, _timeout):
+        async def agent_result(_codex, group, _model, _timeout):
             nonlocal active, maximum_active
             active += 1
             maximum_active = max(maximum_active, active)
             await asyncio.sleep(0.01)
             active -= 1
-            return {
-                "status": "no_program",
-                "source_url": concert.url,
-                "notes": "No programme published.",
-                "composers": [],
-                "program": [],
-                "unresolved_program": [],
-                "event_updates": [],
-            }
+            return no_program_group_result(group.concerts)
 
         codex_class = MagicMock()
         codex_class.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -842,8 +945,8 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             patch.object(analyzer, "validate_and_persist_result"),
         ):
             failures = asyncio.run(
-                analyzer.run_concerts(
-                    concerts,
+                analyzer.run_concert_groups(
+                    groups,
                     model="gpt-5.6-terra",
                     commit=False,
                     timeout_seconds=30,
@@ -857,21 +960,17 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
 
     def test_parallel_results_use_independent_database_connections(self):
         concerts = [
-            analyzer.Concert(index, f"Test {index}", date.today(), "https://example.test", None)
+            analyzer.Concert(
+                index, f"Test {index}", date.today(), f"https://example.test/{index}", None,
+                source="Example", source_url=f"https://example.test/source/{index}",
+            )
             for index in (1, 2)
         ]
+        groups = analyzer.group_concerts(concerts)
         connections = [MagicMock(), MagicMock()]
 
-        async def agent_result(_codex, concert, _model, _timeout):
-            return {
-                "status": "no_program",
-                "source_url": concert.url,
-                "notes": "No programme published.",
-                "composers": [],
-                "program": [],
-                "unresolved_program": [],
-                "event_updates": [],
-            }
+        async def agent_result(_codex, group, _model, _timeout):
+            return no_program_group_result(group.concerts)
 
         with (
             patch.object(analyzer, "run_agent", new=AsyncMock(side_effect=agent_result)),
@@ -885,21 +984,21 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
                 semaphore = asyncio.Semaphore(2)
                 return await asyncio.gather(
                     *(
-                        analyzer.analyze_concert(
+                        analyzer.analyze_concert_group(
                             MagicMock(),
                             semaphore,
-                            concert,
+                            group,
                             "gpt-5.6-terra",
                             True,
                             30,
                         )
-                        for concert in concerts
+                        for group in groups
                     )
                 )
 
             results = asyncio.run(run_all())
 
-        self.assertEqual(results, [False, False])
+        self.assertEqual(results, [0, 0])
         self.assertEqual([call.args[0] for call in persist_result.call_args_list], connections)
         for connection in connections:
             connection.close.assert_called_once()
@@ -917,31 +1016,29 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         turn.run = AsyncMock(side_effect=never_finishes)
         turn.interrupt = AsyncMock()
         concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        group = analyzer.ConcertGroup(("Example", "test", "https://example.test"), (concert,))
 
         with self.assertRaisesRegex(TimeoutError, "exceeded"):
-            asyncio.run(analyzer.run_agent(codex, concert, "gpt-5.6-terra", 0.01))
+            asyncio.run(analyzer.run_agent(codex, group, "gpt-5.6-terra", 0.01))
         turn.interrupt.assert_awaited_once()
 
     def test_one_concert_failure_does_not_cancel_siblings(self):
         concerts = [
-            analyzer.Concert(index, f"Test {index}", date.today(), "https://example.test", None)
+            analyzer.Concert(
+                index, f"Test {index}", date.today(), f"https://example.test/{index}", None,
+                source="Example", source_url=f"https://example.test/source/{index}",
+            )
             for index in range(1, 4)
         ]
+        groups = analyzer.group_concerts(concerts)
         completed = []
 
-        async def agent_result(_codex, concert, _model, _timeout):
+        async def agent_result(_codex, group, _model, _timeout):
+            concert = group.concerts[0]
             if concert.id == 2:
                 raise RuntimeError("one failure")
             completed.append(concert.id)
-            return {
-                "status": "no_program",
-                "source_url": concert.url,
-                "notes": "No programme published.",
-                "composers": [],
-                "program": [],
-                "unresolved_program": [],
-                "event_updates": [],
-            }
+            return no_program_group_result(group.concerts)
 
         with (
             patch.object(analyzer, "run_agent", new=AsyncMock(side_effect=agent_result)),
@@ -956,23 +1053,57 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
                 semaphore = asyncio.Semaphore(2)
                 return await asyncio.gather(
                     *(
-                        analyzer.analyze_concert(
+                        analyzer.analyze_concert_group(
                             MagicMock(),
                             semaphore,
-                            concert,
+                            group,
                             "gpt-5.6-terra",
                             True,
                             30,
                         )
-                        for concert in concerts
+                        for group in groups
                     )
                 )
 
             results = asyncio.run(run_all())
 
-        self.assertEqual(results.count(True), 1)
+        self.assertEqual(results, [0, 1, 0])
         self.assertEqual(completed, [1, 3])
         persist_concert_error.assert_called_once()
+
+    def test_one_invalid_concert_result_does_not_block_group_siblings(self):
+        concerts = [
+            analyzer.Concert(
+                index, "Shared", date.today(), f"https://example.test/{index}", None,
+                source="Example", source_url="https://example.test/series",
+            )
+            for index in (1, 2, 3)
+        ]
+        group = analyzer.group_concerts(concerts)[0]
+
+        def validate(concert, _result, _model, _commit):
+            if concert.id == 2:
+                raise ValueError("invalid occurrence")
+
+        with (
+            patch.object(
+                analyzer,
+                "run_agent",
+                new=AsyncMock(return_value=no_program_group_result(concerts)),
+            ),
+            patch.object(analyzer, "validate_and_persist_result", side_effect=validate) as persist,
+            patch.object(analyzer, "persist_concert_error") as persist_error,
+        ):
+            failures = asyncio.run(
+                analyzer.analyze_concert_group(
+                    MagicMock(), asyncio.Semaphore(1), group,
+                    "gpt-5.6-terra", True, 30,
+                )
+            )
+
+        self.assertEqual(failures, 1)
+        self.assertEqual([call.args[0].id for call in persist.call_args_list], [1, 2, 3])
+        self.assertEqual(persist_error.call_args.args[0].id, 2)
 
 
 if __name__ == "__main__":
