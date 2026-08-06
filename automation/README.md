@@ -1,10 +1,10 @@
 # Crawler factory deployment
 
-The crawler factory is a separate scheduled CapRover worker. Its long-running
-supervisor starts one crawler-creation batch each day, waits for every Codex
-process to finish, and only then asks CapRover to deploy a newer `master`
-commit. It therefore remains decoupled from the normal crawler runner and does
-not interrupt its own agents during automatic updates.
+The crawler factory is a separate continuous CapRover worker. Its long-running
+supervisor runs crawler-creation batches one after another while eligible
+sources exist. Each batch and every Codex process remain sequential. The
+supervisor drains before factory-relevant deployments, so automatic updates do
+not interrupt active agents.
 
 SHA comparison, webhook delivery, retry state, and duplicate suppression are
 shared with the normal scraper runner through `deployment/caprover_updater.py`.
@@ -35,22 +35,25 @@ quality, pagination, and runtime duration are not merge gates.
 
 The defaults baked into `Dockerfile.crawler-factory` are:
 
-- run one batch daily at `06:00` in `Europe/Prague`;
+- run continuously, one batch at a time;
 - process at most five URLs per batch;
 - give each Codex generation 60 minutes;
-- check `master` for a newer commit every five minutes while idle.
+- poll for eligible work every five minutes when a batch claims fewer than five sources;
+- back off for 15 minutes after a batch-level failure.
 
-The supervisor stores `last_factory_attempt_date` in
-`/var/lib/crawler-factory/service-state.json` before starting a batch. A
-container restart therefore does not spend the daily quota twice. If the
-container starts after 06:00 and no attempt is recorded for that date, it runs
-the missed batch immediately.
+Set `CRAWLER_FACTORY_MODE=scheduled` to restore the former once-daily behavior.
+In scheduled mode the supervisor stores `last_factory_attempt_date` in
+`/var/lib/crawler-factory/service-state.json` before starting a batch and runs
+at `06:00` in `Europe/Prague` by default.
 
-The batch runs as a synchronous child process. Update checks cannot execute
-while that child is active. After the batch exits, the supervisor immediately
-checks for an update and then resumes five-minute checks. A successful
-deployment request for the same commit is suppressed for 30 minutes; failed
-Git or webhook calls are logged and retried without stopping the service.
+The batch runs as a synchronous child process. Before starting another batch,
+the supervisor compares the latest unclassified `master` SHA with the previous
+one. Changes entirely below `crawlers/` are recorded without redeploying because
+each batch clones current `master`. Any other change drains the service and
+requests a CapRover deployment. Inconclusive comparisons also keep the service
+drained until they can be retried safely. A successful deployment request for
+the same commit is suppressed for 30 minutes; failed Git or webhook calls remain
+retryable.
 
 ## CapRover deployment
 
@@ -83,7 +86,7 @@ volume mappings:
 
 | Container path | Purpose |
 |---|---|
-| `/var/lib/crawler-factory` | daily schedule state, worker lock, and run reports |
+| `/var/lib/crawler-factory` | supervisor state, worker lock, and run reports |
 | `/factory-home` | isolated GitHub CLI home |
 | `/factory-codex-home` | Codex authentication and configuration |
 
@@ -99,10 +102,13 @@ Set these in **App Configs > Environmental Variables**:
 | `GH_TOKEN` | required | GitHub contents and pull-request write access, without branch-protection bypass |
 | `CRAWLER_FACTORY_DEPLOY_WEBHOOK` | required for auto-update | private webhook copied from this CapRover app |
 | `CRAWLER_FACTORY_REPOSITORY` | repository URL | repository cloned by the worker and checked for updates |
-| `CRAWLER_FACTORY_SCHEDULE_TIME` | `06:00` | daily local time in 24-hour `HH:MM` format |
-| `CRAWLER_FACTORY_TIMEZONE` | `Europe/Prague` | IANA timezone used by the scheduler |
-| `CRAWLER_FACTORY_UPDATE_INTERVAL_MINUTES` | `5` | idle update-check interval |
-| `CRAWLER_FACTORY_MAX_URLS` | `5` | daily URL limit |
+| `CRAWLER_FACTORY_MODE` | `continuous` | `continuous` or rollback-compatible `scheduled` operation |
+| `CRAWLER_FACTORY_SCHEDULE_TIME` | `06:00` | daily time used only in scheduled mode |
+| `CRAWLER_FACTORY_TIMEZONE` | `Europe/Prague` | IANA timezone used in scheduled mode and timestamps |
+| `CRAWLER_FACTORY_UPDATE_INTERVAL_MINUTES` | `5` | drained deployment/update retry interval |
+| `CRAWLER_FACTORY_IDLE_INTERVAL_MINUTES` | `5` | delay after a batch claims fewer than five sources |
+| `CRAWLER_FACTORY_FAILURE_BACKOFF_MINUTES` | `15` | delay after a batch-level failure |
+| `CRAWLER_FACTORY_MAX_URLS` | `5` | per-batch URL limit |
 | `CRAWLER_FACTORY_TIMEOUT_MINUTES` | `60` | per-URL Codex timeout |
 | `CRAWLER_FACTORY_VALIDATION_TIMEOUT_MINUTES` | `15` | per-crawler full-scrape validation timeout |
 | `DB_HOST` | required | PostgreSQL host containing the crawler source registry |
@@ -120,8 +126,8 @@ The supervisor normalizes and validates both commit SHAs and records each
 successfully requested target SHA in its persistent service state. A container
 restart therefore cannot request the same deployment repeatedly.
 
-All numeric settings must be positive integers. An invalid schedule, timezone,
-or numeric setting stops startup with an explicit error. If either the
+All numeric settings must be positive integers. An invalid mode, schedule,
+timezone, or numeric setting stops startup with an explicit error. If either the
 CapRover webhook or deployed commit SHA is unavailable, crawler creation still
 runs but automatic updates are disabled with a warning.
 
@@ -140,9 +146,9 @@ The exact service-name fragment follows the CapRover app name. Authentication
 is retained in `/factory-codex-home`, so later deployments do not require
 another login.
 
-Inspect the app logs after authentication. Startup should report the daily
-schedule and update interval. Before 06:00 it waits; after 06:00 it runs
-immediately if no attempt has yet been recorded for that day.
+Inspect the app logs after authentication. Startup should report continuous
+batching and the idle interval. If eligible sources exist, the first batch
+starts immediately.
 
 ## GitHub settings
 
@@ -179,8 +185,9 @@ The persistent scheduler state and worker lock are:
 ```
 
 Source status, retry dates, URL aliases, crawler paths, runs, and attempts live
-in PostgreSQL. `service-state.json` contains the date on which the supervisor
-last attempted its daily batch.
+in PostgreSQL. `service-state.json` contains deployment suppression state, the
+last classified `master` SHA, and the last scheduled attempt date when scheduled
+mode is used.
 
 ### Apply the initial source seed
 
@@ -218,7 +225,7 @@ uv run python -m seeds.import_crawler_sources \
 ### Run a manual batch
 
 Running the worker module directly inside the existing container does not
-affect the supervisor's daily-attempt marker:
+affect the supervisor's scheduling state:
 
 ```bash
 docker exec -it <container-id> \
@@ -236,15 +243,14 @@ Inside the deployed container, the repository defaults to
 `CRAWLER_FACTORY_REPOSITORY`. Pass `--repository` only to override it or when
 running outside that configured environment.
 
-The worker's file lock prevents this command from overlapping an already
-active scheduled batch.
+The worker's file lock prevents this command from overlapping an active batch.
 
 ### Force an update
 
 Use **Deploy Now** in CapRover or invoke the private deployment webhook
 manually. A manually initiated deployment is outside the supervisor's idle
 guard and can interrupt an active batch, so first confirm in the logs that no
-daily batch is running.
+batch is running.
 
 ### Recover from a failed update
 

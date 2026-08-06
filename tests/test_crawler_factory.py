@@ -50,6 +50,27 @@ def blocked_text(url: str, country_code: str, attempted: date) -> str:
     )
 
 
+class SupervisorResultTests(unittest.TestCase):
+    def test_result_is_written_with_claim_and_outcome_counts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "result.json"
+            factory.write_supervisor_result(
+                path,
+                run_id="run-1",
+                claimed_count=2,
+                results=[{"status": "generated"}, {"status": "blocked"}],
+                status="pr_open",
+                pull_request_url="https://example.test/pr/1",
+            )
+            result = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["claimed_count"], 2)
+        self.assertEqual(result["attempted_count"], 2)
+        self.assertEqual(result["status_counts"], {"blocked": 1, "generated": 1})
+        self.assertEqual(result["status"], "pr_open")
+        self.assertEqual(result["pull_request_url"], "https://example.test/pr/1")
+
+
 class BlockedMetadataTests(unittest.TestCase):
     def test_valid_blocked_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:

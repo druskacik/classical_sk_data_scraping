@@ -97,7 +97,7 @@ class CapRoverUpdater:
     def save_state(self) -> None:
         save_state(self.config.state_path, self.state)
 
-    def check_for_update(self) -> bool:
+    def check_for_update(self, *, latest_commit: str | None = None) -> bool:
         self.last_check_conclusive = False
         deployed_commit_value = os.getenv("CAPROVER_GIT_COMMIT_SHA")
         if not self.config.deploy_webhook or not deployed_commit_value:
@@ -122,11 +122,18 @@ class CapRoverUpdater:
                 self._configuration_warning_logged = True
             self.last_check_conclusive = True
             return False
-        try:
-            latest_commit = remote_commit(self.config.repository)
-        except Exception as exc:
-            self.log(f"Could not check master for updates: {type(exc).__name__}: {exc}")
-            return False
+        if latest_commit is None:
+            try:
+                latest_commit = remote_commit(self.config.repository)
+            except Exception as exc:
+                self.log(f"Could not check master for updates: {type(exc).__name__}: {exc}")
+                return False
+        else:
+            try:
+                latest_commit = normalize_commit_sha(latest_commit, "latest commit")
+            except ValueError as exc:
+                self.log(f"Could not check master for updates: {type(exc).__name__}: {exc}")
+                return False
         if latest_commit == deployed_commit or recently_requested(self.state, latest_commit):
             self.last_check_conclusive = True
             return False

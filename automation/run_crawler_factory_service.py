@@ -5,6 +5,7 @@ import logging
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -17,12 +18,16 @@ from deployment.caprover_updater import (
     CapRoverUpdater,
     CapRoverUpdaterConfig,
     load_state,
+    normalize_commit_sha,
+    remote_commit,
     save_state,
 )
 
 
 DEFAULT_SERVICE_STATE_PATH = Path("/var/lib/crawler-factory/service-state.json")
 DEFAULT_REPOSITORY = "https://github.com/druskacik/classical_bot.git"
+CONTINUOUS_MODE = "continuous"
+SCHEDULED_MODE = "scheduled"
 logger = logging.getLogger(__name__)
 
 
@@ -38,10 +43,16 @@ def log(message: str) -> None:
         event = "deployment_updates_disabled"
     elif message.startswith("Ignoring unreadable deployment state"):
         event = "deployment_state_invalid"
-    elif message.startswith("Starting daily crawler-factory batch"):
+    elif message.startswith("Starting crawler-factory batch"):
         event = "factory_batch_started"
-    elif message.startswith("Daily batch finished"):
+    elif message.startswith("Crawler-factory batch finished"):
         event = "factory_batch_completed"
+    elif message.startswith("Crawler-only master update"):
+        event = "factory_crawler_only_update"
+    elif message.startswith("Factory-relevant master update"):
+        event = "factory_deployment_pending"
+    elif message.startswith("Could not classify master update"):
+        event = "factory_update_classification_failed"
     elif message.startswith("Received signal"):
         event = "factory_service_signal_received"
     elif message == "Stopped":
@@ -67,12 +78,61 @@ def parse_schedule(value: str) -> wall_time:
         raise ValueError("CRAWLER_FACTORY_SCHEDULE_TIME must use HH:MM in 24-hour time") from exc
 
 
+def parse_mode(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in {CONTINUOUS_MODE, SCHEDULED_MODE}:
+        raise ValueError("CRAWLER_FACTORY_MODE must be 'continuous' or 'scheduled'")
+    return normalized
+
+
+def changed_paths_between(repository: str, old_commit: str, new_commit: str) -> list[str]:
+    local_repository = Path(repository)
+    git_repository = str(local_repository.resolve()) if local_repository.exists() else repository
+    with tempfile.TemporaryDirectory(prefix="crawler-factory-update-") as temporary:
+        checkout = Path(temporary)
+        commands = [
+            ["git", "init", "--quiet", str(checkout)],
+            ["git", "-C", str(checkout), "remote", "add", "origin", git_repository],
+            [
+                "git", "-C", str(checkout), "fetch", "--quiet", "--no-tags", "--depth=1",
+                "origin", old_commit,
+            ],
+            [
+                "git", "-C", str(checkout), "fetch", "--quiet", "--no-tags", "--depth=1",
+                "origin", new_commit,
+            ],
+        ]
+        for command in commands:
+            subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            [
+                "git", "-C", str(checkout), "diff", "--name-only", "--no-renames",
+                old_commit, new_commit,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    return [line for line in result.stdout.splitlines() if line]
+
+
+@dataclass(frozen=True)
+class BatchOutcome:
+    return_code: int
+    claimed_count: int | None
+    status: str | None
+
+
 @dataclass(frozen=True)
 class ServiceConfig:
     repository: str
+    mode: str
     schedule_time: wall_time
     timezone: ZoneInfo
     update_interval_seconds: int
+    idle_interval_seconds: int
+    failure_backoff_seconds: int
     deploy_webhook: str | None
     max_urls: int
     timeout_minutes: int
@@ -94,9 +154,18 @@ class ServiceConfig:
         )
         return cls(
             repository=os.getenv("CRAWLER_FACTORY_REPOSITORY", DEFAULT_REPOSITORY),
+            mode=parse_mode(os.getenv("CRAWLER_FACTORY_MODE", CONTINUOUS_MODE)),
             schedule_time=parse_schedule(os.getenv("CRAWLER_FACTORY_SCHEDULE_TIME", "06:00")),
             timezone=timezone,
             update_interval_seconds=update_minutes * 60,
+            idle_interval_seconds=positive_integer(
+                os.getenv("CRAWLER_FACTORY_IDLE_INTERVAL_MINUTES", "5"),
+                "CRAWLER_FACTORY_IDLE_INTERVAL_MINUTES",
+            ) * 60,
+            failure_backoff_seconds=positive_integer(
+                os.getenv("CRAWLER_FACTORY_FAILURE_BACKOFF_MINUTES", "15"),
+                "CRAWLER_FACTORY_FAILURE_BACKOFF_MINUTES",
+            ) * 60,
             deploy_webhook=os.getenv("CRAWLER_FACTORY_DEPLOY_WEBHOOK") or None,
             max_urls=positive_integer(
                 os.getenv("CRAWLER_FACTORY_MAX_URLS", "5"),
@@ -161,6 +230,8 @@ class FactoryService:
         self.state = self.updater.state
         self.stop_event = threading.Event()
         self.child: subprocess.Popen | None = None
+        self.deployment_pending = False
+        self.update_check_conclusive = True
 
     def stop(self, signum: int, _frame: object = None) -> None:
         log(f"Received signal {signum}; stopping")
@@ -168,9 +239,12 @@ class FactoryService:
         if self.child is not None and self.child.poll() is None:
             self.child.send_signal(signum)
 
-    def run_factory(self, now: datetime) -> int:
-        self.state["last_factory_attempt_date"] = now.date().isoformat()
-        self.updater.save_state()
+    def run_factory(self, now: datetime) -> BatchOutcome:
+        if self.config.mode == SCHEDULED_MODE:
+            self.state["last_factory_attempt_date"] = now.date().isoformat()
+            self.updater.save_state()
+        result_path = self.config.state_path.parent / "last-batch-result.json"
+        result_path.unlink(missing_ok=True)
         command = [
             sys.executable,
             "-m",
@@ -183,9 +257,11 @@ class FactoryService:
             str(self.config.timeout_minutes),
             "--validation-timeout-minutes",
             str(self.config.validation_timeout_minutes),
+            "--result-path",
+            str(result_path),
         ]
         log(
-            f"Starting daily batch for {now.date().isoformat()} "
+            f"Starting crawler-factory batch for {now.date().isoformat()} "
             f"(max URLs: {self.config.max_urls})"
         )
         self.child = subprocess.Popen(command)
@@ -193,40 +269,113 @@ class FactoryService:
             while self.child.poll() is None:
                 if self.stop_event.wait(1):
                     try:
-                        return self.child.wait(timeout=30)
+                        return BatchOutcome(self.child.wait(timeout=30), None, None)
                     except subprocess.TimeoutExpired:
                         log("Factory child did not stop within 30 seconds; killing it")
                         self.child.kill()
-                        return self.child.wait()
-            return self.child.returncode
+                        return BatchOutcome(self.child.wait(), None, None)
+            try:
+                payload = load_state(result_path, log)
+                claimed_count = int(payload["claimed_count"])
+                status = str(payload["status"])
+            except (KeyError, TypeError, ValueError):
+                claimed_count = None
+                status = None
+            return BatchOutcome(self.child.returncode, claimed_count, status)
         finally:
             return_code = self.child.returncode
             self.child = None
-            log(f"Daily batch finished with status {return_code}")
+            log(f"Crawler-factory batch finished with status {return_code}")
 
     def check_for_update(self) -> bool:
         if self.child is not None and self.child.poll() is None:
             return False
-        return self.updater.check_for_update()
+        self.deployment_pending = False
+        self.update_check_conclusive = False
+        deployed_value = os.getenv("CAPROVER_GIT_COMMIT_SHA")
+        if not self.config.deploy_webhook or not deployed_value:
+            requested = self.updater.check_for_update()
+            self.update_check_conclusive = self.updater.last_check_conclusive
+            return requested
+        try:
+            deployed_commit = normalize_commit_sha(deployed_value, "CAPROVER_GIT_COMMIT_SHA")
+            latest_commit = remote_commit(self.config.repository)
+            baseline_value = self.state.get("last_factory_checked_sha", deployed_commit)
+            baseline_commit = normalize_commit_sha(baseline_value, "last_factory_checked_sha")
+            if latest_commit == deployed_commit:
+                self.state["last_factory_checked_sha"] = latest_commit
+                self.updater.save_state()
+                self.update_check_conclusive = True
+                return False
+            if latest_commit == baseline_commit:
+                self.update_check_conclusive = True
+                return False
+            changed_paths = changed_paths_between(
+                self.config.repository,
+                baseline_commit,
+                latest_commit,
+            )
+        except Exception as exc:
+            log(f"Could not classify master update: {type(exc).__name__}: {exc}")
+            return False
+        if changed_paths and all(path.startswith("crawlers/") for path in changed_paths):
+            self.state["last_factory_checked_sha"] = latest_commit
+            self.updater.save_state()
+            self.update_check_conclusive = True
+            log(
+                f"Crawler-only master update through {latest_commit[:12]}; "
+                "continuing without deployment"
+            )
+            return False
+        self.deployment_pending = True
+        log(
+            f"Factory-relevant master update through {latest_commit[:12]}; "
+            "draining until deployment"
+        )
+        requested = self.updater.check_for_update(latest_commit=latest_commit)
+        self.update_check_conclusive = self.updater.last_check_conclusive
+        return requested
+
+    def wait(self, seconds: int) -> None:
+        self.stop_event.wait(seconds)
 
     def run(self) -> None:
         signal.signal(signal.SIGTERM, self.stop)
         signal.signal(signal.SIGINT, self.stop)
         prepare_git_authentication()
         next_update_check = 0.0
-        log(
-            f"Scheduling one daily batch at {self.config.schedule_time:%H:%M} "
-            f"{self.config.timezone.key}; checking for updates every "
-            f"{self.config.update_interval_seconds // 60} minutes"
-        )
+        if self.config.mode == CONTINUOUS_MODE:
+            log(
+                f"Running continuous batches of at most {self.config.max_urls}; "
+                f"idle polling every {self.config.idle_interval_seconds // 60} minutes"
+            )
+        else:
+            log(
+                f"Scheduling one daily batch at {self.config.schedule_time:%H:%M} "
+                f"{self.config.timezone.key}; checking for updates every "
+                f"{self.config.update_interval_seconds // 60} minutes"
+            )
         while not self.stop_event.is_set():
             now = datetime.now(self.config.timezone)
-            if batch_is_due(now, self.config.schedule_time, self.state):
-                self.run_factory(now)
+            should_run = self.config.mode == CONTINUOUS_MODE or batch_is_due(
+                now, self.config.schedule_time, self.state
+            )
+            if should_run:
+                self.check_for_update()
+                if self.deployment_pending or not self.update_check_conclusive:
+                    self.wait(self.config.update_interval_seconds)
+                    continue
+                outcome = self.run_factory(now)
                 if self.stop_event.is_set():
                     break
-                self.check_for_update()
-                next_update_check = time.monotonic() + self.config.update_interval_seconds
+                if self.config.mode == SCHEDULED_MODE:
+                    self.check_for_update()
+                    next_update_check = time.monotonic() + self.config.update_interval_seconds
+                    continue
+                if outcome.return_code != 0:
+                    self.wait(self.config.failure_backoff_seconds)
+                elif outcome.claimed_count != self.config.max_urls:
+                    self.wait(self.config.idle_interval_seconds)
                 continue
             monotonic_now = time.monotonic()
             if monotonic_now >= next_update_check:

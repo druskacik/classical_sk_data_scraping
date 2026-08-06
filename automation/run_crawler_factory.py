@@ -77,6 +77,35 @@ def run_command(
     )
 
 
+def write_supervisor_result(
+    path: Path | None,
+    *,
+    run_id: str,
+    claimed_count: int,
+    results: list[dict],
+    status: str,
+    pull_request_url: str | None = None,
+) -> None:
+    if path is None:
+        return
+    status_counts = {
+        outcome: sum(result.get("status") == outcome for result in results)
+        for outcome in {str(result.get("status")) for result in results}
+    }
+    payload = {
+        "run_id": run_id,
+        "claimed_count": claimed_count,
+        "attempted_count": len(results),
+        "status_counts": status_counts,
+        "status": status,
+        "pull_request_url": pull_request_url,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
 def crawler_directory(url: str, country_code: str | None = None) -> Path:
     country = country_code or country_code_for_url(url)
     return Path("crawlers") / country.lower() / crawler_folder_name(url)
@@ -867,6 +896,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--lock-path", type=Path, default=DEFAULT_LOCK_PATH)
     parser.add_argument("--runs-dir", type=Path, default=DEFAULT_RUNS_DIR)
+    parser.add_argument(
+        "--result-path",
+        type=Path,
+        help="Write an atomic machine-readable batch summary for the supervisor.",
+    )
     parser.add_argument("--url", action="append", dest="urls")
     parser.add_argument("--country-code")
     parser.add_argument("--source-id", action="append", type=int, dest="source_ids")
@@ -893,8 +927,10 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
     run_dir.mkdir(parents=True)
     workspace = Path(tempfile.mkdtemp(prefix="crawler-factory-"))
     results: list[dict] = []
+    claimed_count = 0
     successful_source_ids: list[int] = []
     run_created = False
+    supervisor_result_written = False
     try:
         if os.getenv("GH_TOKEN"):
             run_command(["gh", "auth", "setup-git"])
@@ -943,6 +979,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
             )
             if not source:
                 break
+            claimed_count += 1
             attempt_id = registry.start_attempt(source, run_id)
             resolved_url = resolve_source_url(source["canonical_url"])
             assigned_path = source.get("crawler_path") or str(
@@ -1048,6 +1085,14 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
         )
         if not successful_source_ids:
             registry.finish_run(run_id, "no_changes")
+            write_supervisor_result(
+                args.result_path,
+                run_id=run_id,
+                claimed_count=claimed_count,
+                results=results,
+                status="no_changes",
+            )
+            supervisor_result_written = True
             logger.info(
                 "Factory batch produced no changes",
                 extra={"event": "factory_batch_no_changes", "report_path": str(report_path)},
@@ -1055,6 +1100,14 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
             return
         if args.no_push:
             registry.finish_run(run_id, "failed")
+            write_supervisor_result(
+                args.result_path,
+                run_id=run_id,
+                claimed_count=claimed_count,
+                results=results,
+                status="no_push",
+            )
+            supervisor_result_written = True
             logger.info(
                 "Factory commits created without push",
                 extra={
@@ -1100,9 +1153,26 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
             "Opened auto-merge pull request",
             extra={"event": "factory_pull_request_opened", "pull_request_url": pr_url},
         )
+        write_supervisor_result(
+            args.result_path,
+            run_id=run_id,
+            claimed_count=claimed_count,
+            results=results,
+            status="pr_open",
+            pull_request_url=pr_url,
+        )
+        supervisor_result_written = True
     except Exception:
         if run_created:
             registry.finish_run(run_id, "failed")
+        if not supervisor_result_written:
+            write_supervisor_result(
+                args.result_path,
+                run_id=run_id,
+                claimed_count=claimed_count,
+                results=results,
+                status="failed",
+            )
         raise
     finally:
         if not args.keep_workspace:

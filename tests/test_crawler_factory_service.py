@@ -21,8 +21,11 @@ class ServiceConfigTests(unittest.TestCase):
             config = service.ServiceConfig.from_environment()
 
         self.assertEqual(config.schedule_time.strftime("%H:%M"), "06:00")
+        self.assertEqual(config.mode, "continuous")
         self.assertEqual(config.timezone.key, "Europe/Prague")
         self.assertEqual(config.update_interval_seconds, 300)
+        self.assertEqual(config.idle_interval_seconds, 300)
+        self.assertEqual(config.failure_backoff_seconds, 900)
         self.assertEqual(config.max_urls, 5)
         self.assertEqual(config.timeout_minutes, 60)
         self.assertEqual(config.validation_timeout_minutes, 15)
@@ -34,6 +37,11 @@ class ServiceConfigTests(unittest.TestCase):
             clear=True,
         ):
             with self.assertRaisesRegex(ValueError, "HH:MM"):
+                service.ServiceConfig.from_environment()
+
+    def test_invalid_mode_is_rejected(self):
+        with patch.dict(os.environ, {"CRAWLER_FACTORY_MODE": "sometimes"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "continuous.*scheduled"):
                 service.ServiceConfig.from_environment()
 
     def test_invalid_timezone_is_rejected(self):
@@ -89,12 +97,20 @@ class ScheduleTests(unittest.TestCase):
 
 
 class FactoryServiceTests(unittest.TestCase):
-    def config(self, root: Path, webhook: str | None = "https://captain.test/hook"):
+    def config(
+        self,
+        root: Path,
+        webhook: str | None = "https://captain.test/hook",
+        mode: str = service.CONTINUOUS_MODE,
+    ):
         return service.ServiceConfig(
             repository="https://github.com/example/repository.git",
+            mode=mode,
             schedule_time=service.parse_schedule("06:00"),
             timezone=ZoneInfo("Europe/Prague"),
             update_interval_seconds=300,
+            idle_interval_seconds=300,
+            failure_backoff_seconds=900,
             deploy_webhook=webhook,
             max_urls=7,
             timeout_minutes=45,
@@ -105,7 +121,7 @@ class FactoryServiceTests(unittest.TestCase):
     def test_factory_attempt_is_persisted_before_child_starts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            supervisor = service.FactoryService(self.config(root))
+            supervisor = service.FactoryService(self.config(root, mode=service.SCHEDULED_MODE))
             process = Mock()
             process.poll.return_value = 0
             process.returncode = 0
@@ -117,7 +133,7 @@ class FactoryServiceTests(unittest.TestCase):
 
             state = service.load_service_state(root / "service-state.json")
 
-        self.assertEqual(result, 0)
+        self.assertEqual(result.return_code, 0)
         self.assertEqual(state["last_factory_attempt_date"], "2026-07-26")
         command = popen.call_args.args[0]
         self.assertIn("https://github.com/example/repository.git", command)
@@ -130,7 +146,7 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(caprover, "remote_commit", return_value=OLD_SHA),
+                patch.object(service, "remote_commit", return_value=OLD_SHA),
                 patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertFalse(supervisor.check_for_update())
@@ -146,7 +162,7 @@ class FactoryServiceTests(unittest.TestCase):
                     {"CAPROVER_GIT_COMMIT_SHA": f"{OLD_SHA}\n"},
                     clear=True,
                 ),
-                patch.object(caprover, "remote_commit", return_value=OLD_SHA),
+                patch.object(service, "remote_commit", return_value=OLD_SHA),
                 patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertFalse(supervisor.check_for_update())
@@ -158,7 +174,8 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(caprover, "remote_commit", return_value=NEW_SHA),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
+                patch.object(service, "changed_paths_between", return_value=["automation/service.py"]),
                 patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertTrue(supervisor.check_for_update())
@@ -172,7 +189,8 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(config)
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(caprover, "remote_commit", return_value=NEW_SHA),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
+                patch.object(service, "changed_paths_between", return_value=["automation/service.py"]),
                 patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertTrue(supervisor.check_for_update())
@@ -188,7 +206,8 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary)))
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(caprover, "remote_commit", return_value=NEW_SHA),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
+                patch.object(service, "changed_paths_between", return_value=["automation/service.py"]),
                 patch.object(
                     caprover,
                     "request_deployment",
@@ -202,14 +221,16 @@ class FactoryServiceTests(unittest.TestCase):
 
     def test_invalid_deployed_commit_disables_update(self):
         with tempfile.TemporaryDirectory() as temporary:
-            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor = service.FactoryService(
+                self.config(Path(temporary), mode=service.SCHEDULED_MODE)
+            )
             with (
                 patch.dict(
                     os.environ,
                     {"CAPROVER_GIT_COMMIT_SHA": "not-a-commit"},
                     clear=True,
                 ),
-                patch.object(caprover, "remote_commit") as remote,
+                patch.object(service, "remote_commit") as remote,
                 patch.object(caprover, "request_deployment") as deploy,
             ):
                 self.assertFalse(supervisor.check_for_update())
@@ -222,14 +243,16 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary)))
             supervisor.child = Mock()
             supervisor.child.poll.return_value = None
-            with patch.object(caprover, "remote_commit") as remote:
+            with patch.object(service, "remote_commit") as remote:
                 self.assertFalse(supervisor.check_for_update())
 
         remote.assert_not_called()
 
     def test_service_loop_calls_update_check_without_obsolete_timestamp_argument(self):
         with tempfile.TemporaryDirectory() as temporary:
-            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor = service.FactoryService(
+                self.config(Path(temporary), mode=service.SCHEDULED_MODE)
+            )
             today = datetime.now(supervisor.config.timezone).date().isoformat()
             supervisor.state["last_factory_attempt_date"] = today
 
@@ -266,7 +289,7 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor = service.FactoryService(self.config(Path(temporary), webhook=None))
             with (
                 patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
-                patch.object(caprover, "remote_commit") as remote,
+                patch.object(service, "remote_commit") as remote,
             ):
                 self.assertFalse(supervisor.check_for_update())
 
@@ -286,6 +309,168 @@ class FactoryServiceTests(unittest.TestCase):
             text=True,
             timeout=30,
         )
+
+    def test_crawler_only_update_is_recorded_without_deployment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            supervisor = service.FactoryService(self.config(root))
+            with (
+                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
+                patch.object(
+                    service,
+                    "changed_paths_between",
+                    return_value=["crawlers/cz/example/main.py", "crawlers/sk/old/main.py"],
+                ),
+                patch.object(caprover, "request_deployment") as deploy,
+            ):
+                self.assertFalse(supervisor.check_for_update())
+
+            state = service.load_service_state(root / "service-state.json")
+
+        self.assertEqual(state["last_factory_checked_sha"], NEW_SHA)
+        self.assertFalse(supervisor.deployment_pending)
+        deploy.assert_not_called()
+
+    def test_previously_classified_crawler_update_needs_no_new_diff(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor.state["last_factory_checked_sha"] = NEW_SHA
+            with (
+                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
+                patch.object(service, "changed_paths_between") as changed,
+            ):
+                self.assertFalse(supervisor.check_for_update())
+
+        changed.assert_not_called()
+        self.assertFalse(supervisor.deployment_pending)
+
+    def test_mixed_update_drains_even_when_deploy_request_is_suppressed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            with (
+                patch.dict(os.environ, {"CAPROVER_GIT_COMMIT_SHA": OLD_SHA}, clear=True),
+                patch.object(service, "remote_commit", return_value=NEW_SHA),
+                patch.object(
+                    service,
+                    "changed_paths_between",
+                    return_value=["crawlers/cz/example/main.py", "automation/service.py"],
+                ),
+                patch.object(supervisor.updater, "check_for_update", return_value=False),
+            ):
+                supervisor.updater.last_check_conclusive = True
+                self.assertFalse(supervisor.check_for_update())
+
+        self.assertTrue(supervisor.deployment_pending)
+
+    def test_inconclusive_update_check_drains_without_starting_batch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+
+            def stop_after_wait(_seconds):
+                supervisor.stop_event.set()
+
+            with (
+                patch.object(service.signal, "signal"),
+                patch.object(service, "prepare_git_authentication"),
+                patch.object(supervisor, "check_for_update", return_value=False),
+                patch.object(supervisor, "run_factory") as run_factory,
+                patch.object(supervisor, "wait", side_effect=stop_after_wait) as wait,
+            ):
+                supervisor.update_check_conclusive = False
+                supervisor.run()
+
+        run_factory.assert_not_called()
+        wait.assert_called_once_with(300)
+
+    def test_partial_continuous_batch_waits_for_idle_interval(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+
+            def conclusive_check():
+                supervisor.update_check_conclusive = True
+                supervisor.deployment_pending = False
+                return False
+
+            def stop_after_wait(_seconds):
+                supervisor.stop_event.set()
+
+            with (
+                patch.object(service.signal, "signal"),
+                patch.object(service, "prepare_git_authentication"),
+                patch.object(supervisor, "check_for_update", side_effect=conclusive_check),
+                patch.object(
+                    supervisor,
+                    "run_factory",
+                    return_value=service.BatchOutcome(0, 3, "pr_open"),
+                ),
+                patch.object(supervisor, "wait", side_effect=stop_after_wait) as wait,
+            ):
+                supervisor.run()
+
+        wait.assert_called_once_with(300)
+
+    def test_failed_continuous_batch_uses_failure_backoff(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+
+            def conclusive_check():
+                supervisor.update_check_conclusive = True
+                supervisor.deployment_pending = False
+                return False
+
+            def stop_after_wait(_seconds):
+                supervisor.stop_event.set()
+
+            with (
+                patch.object(service.signal, "signal"),
+                patch.object(service, "prepare_git_authentication"),
+                patch.object(supervisor, "check_for_update", side_effect=conclusive_check),
+                patch.object(
+                    supervisor,
+                    "run_factory",
+                    return_value=service.BatchOutcome(1, None, "failed"),
+                ),
+                patch.object(supervisor, "wait", side_effect=stop_after_wait) as wait,
+            ):
+                supervisor.run()
+
+        wait.assert_called_once_with(900)
+
+    def test_full_continuous_batch_starts_next_batch_without_waiting(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+
+            def conclusive_check():
+                supervisor.update_check_conclusive = True
+                supervisor.deployment_pending = False
+                return False
+
+            run_count = 0
+
+            def finish_after_second_batch(_now):
+                nonlocal run_count
+                run_count += 1
+                if run_count == 2:
+                    supervisor.stop_event.set()
+                return service.BatchOutcome(0, supervisor.config.max_urls, "pr_open")
+
+            with (
+                patch.object(service.signal, "signal"),
+                patch.object(service, "prepare_git_authentication"),
+                patch.object(supervisor, "check_for_update", side_effect=conclusive_check),
+                patch.object(
+                    supervisor,
+                    "run_factory",
+                    side_effect=finish_after_second_batch,
+                ) as run_factory,
+                patch.object(supervisor, "wait") as wait,
+            ):
+                supervisor.run()
+
+        self.assertEqual(run_factory.call_count, 2)
+        wait.assert_not_called()
 
 
 if __name__ == "__main__":
