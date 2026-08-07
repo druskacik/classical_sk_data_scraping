@@ -61,6 +61,7 @@ class SupervisorResultTests(unittest.TestCase):
                 results=[{"status": "generated"}, {"status": "blocked"}],
                 status="pr_open",
                 pull_request_url="https://example.test/pr/1",
+                base_commit_sha="a" * 40,
             )
             result = json.loads(path.read_text(encoding="utf-8"))
 
@@ -68,6 +69,7 @@ class SupervisorResultTests(unittest.TestCase):
         self.assertEqual(result["attempted_count"], 2)
         self.assertEqual(result["status_counts"], {"blocked": 1, "generated": 1})
         self.assertEqual(result["status"], "pr_open")
+        self.assertEqual(result["base_commit_sha"], "a" * 40)
         self.assertEqual(result["pull_request_url"], "https://example.test/pr/1")
 
 
