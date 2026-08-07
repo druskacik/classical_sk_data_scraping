@@ -26,6 +26,7 @@ class ServiceConfigTests(unittest.TestCase):
         self.assertEqual(config.update_interval_seconds, 300)
         self.assertEqual(config.idle_interval_seconds, 300)
         self.assertEqual(config.failure_backoff_seconds, 900)
+        self.assertEqual(config.pr_poll_interval_seconds, 60)
         self.assertEqual(config.max_urls, 5)
         self.assertEqual(config.timeout_minutes, 60)
         self.assertEqual(config.validation_timeout_minutes, 15)
@@ -111,6 +112,7 @@ class FactoryServiceTests(unittest.TestCase):
             update_interval_seconds=300,
             idle_interval_seconds=300,
             failure_backoff_seconds=900,
+            pr_poll_interval_seconds=60,
             deploy_webhook=webhook,
             max_urls=7,
             timeout_minutes=45,
@@ -140,6 +142,32 @@ class FactoryServiceTests(unittest.TestCase):
         self.assertEqual(command[command.index("--max-urls") + 1], "7")
         self.assertEqual(command[command.index("--timeout-minutes") + 1], "45")
         self.assertEqual(command[command.index("--validation-timeout-minutes") + 1], "20")
+
+    def test_factory_outcome_includes_pull_request_url(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            process = Mock()
+            process.poll.return_value = 0
+            process.returncode = 0
+            payload = {
+                "claimed_count": 5,
+                "status": "pr_open",
+                "pull_request_url": "https://github.com/example/repository/pull/1",
+            }
+            with (
+                patch.object(subprocess, "Popen", return_value=process),
+                patch.object(service, "load_state", return_value=payload),
+            ):
+                result = supervisor.run_factory(
+                    datetime(2026, 7, 26, 6, 0, tzinfo=ZoneInfo("Europe/Prague"))
+                )
+
+        self.assertEqual(result.claimed_count, 5)
+        self.assertEqual(result.status, "pr_open")
+        self.assertEqual(
+            result.pull_request_url,
+            "https://github.com/example/repository/pull/1",
+        )
 
     def test_matching_commit_does_not_request_deployment(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -384,6 +412,123 @@ class FactoryServiceTests(unittest.TestCase):
         run_factory.assert_not_called()
         wait.assert_called_once_with(300)
 
+    def test_open_pending_pull_request_blocks_batch_and_waits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            supervisor = service.FactoryService(self.config(root))
+            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+
+            def stop_after_wait(_seconds):
+                supervisor.stop_event.set()
+
+            response = Mock(
+                stdout=(
+                    '{"state":"OPEN","mergedAt":null,"mergeStateStatus":"BEHIND",'
+                    '"statusCheckRollup":[]}'
+                )
+            )
+            with (
+                patch.object(service.signal, "signal"),
+                patch.object(service, "prepare_git_authentication"),
+                patch.object(service.subprocess, "run", return_value=response) as run,
+                patch.object(supervisor, "run_factory") as run_factory,
+                patch.object(supervisor, "wait", side_effect=stop_after_wait) as wait,
+            ):
+                supervisor.run()
+
+        run.assert_called_once()
+        run_factory.assert_not_called()
+        wait.assert_called_once_with(60)
+
+    def test_successful_but_unmerged_pull_request_keeps_waiting(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            response = Mock(
+                stdout=(
+                    '{"state":"OPEN","mergedAt":null,"mergeStateStatus":"CLEAN",'
+                    '"statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
+                )
+            )
+            with patch.object(service.subprocess, "run", return_value=response):
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+
+        self.assertIn("pending_factory_pr_url", supervisor.state)
+
+    def test_failed_pull_request_keeps_waiting(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            response = Mock(
+                stdout=(
+                    '{"state":"OPEN","mergedAt":null,"mergeStateStatus":"BLOCKED",'
+                    '"statusCheckRollup":[{"conclusion":"FAILURE"}]}'
+                )
+            )
+            with patch.object(service.subprocess, "run", return_value=response):
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+
+        self.assertIn("pending_factory_pr_url", supervisor.state)
+
+    def test_merged_pull_request_clears_persisted_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self.config(root)
+            supervisor = service.FactoryService(config)
+            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            response = Mock(
+                stdout=(
+                    '{"state":"MERGED","mergedAt":"2026-08-07T12:00:00Z",'
+                    '"mergeStateStatus":"UNKNOWN","statusCheckRollup":[]}'
+                )
+            )
+            with patch.object(service.subprocess, "run", return_value=response):
+                self.assertFalse(supervisor.pending_pull_request_is_open())
+            restarted = service.FactoryService(config)
+
+        self.assertNotIn("pending_factory_pr_url", restarted.state)
+
+    def test_closed_unmerged_pull_request_clears_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            response = Mock(
+                stdout=(
+                    '{"state":"CLOSED","mergedAt":null,"mergeStateStatus":"UNKNOWN",'
+                    '"statusCheckRollup":[]}'
+                )
+            )
+            with patch.object(service.subprocess, "run", return_value=response):
+                self.assertFalse(supervisor.pending_pull_request_is_open())
+
+        self.assertNotIn("pending_factory_pr_url", supervisor.state)
+
+    def test_pull_request_query_error_preserves_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            with patch.object(
+                service.subprocess,
+                "run",
+                side_effect=service.subprocess.TimeoutExpired("gh", 30),
+            ):
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+
+        self.assertIn("pending_factory_pr_url", supervisor.state)
+
+    def test_malformed_pull_request_response_preserves_gate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            with patch.object(
+                service.subprocess,
+                "run",
+                return_value=Mock(stdout='{"state":"UNKNOWN"}'),
+            ):
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+
+        self.assertIn("pending_factory_pr_url", supervisor.state)
+
     def test_partial_continuous_batch_waits_for_idle_interval(self):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))
@@ -438,7 +583,7 @@ class FactoryServiceTests(unittest.TestCase):
 
         wait.assert_called_once_with(900)
 
-    def test_full_continuous_batch_starts_next_batch_without_waiting(self):
+    def test_full_continuous_batch_with_pull_request_waits_before_next_batch(self):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))
 
@@ -447,14 +592,23 @@ class FactoryServiceTests(unittest.TestCase):
                 supervisor.deployment_pending = False
                 return False
 
-            run_count = 0
+            def finish_batch(_now):
+                return service.BatchOutcome(
+                    0,
+                    supervisor.config.max_urls,
+                    "pr_open",
+                    "https://github.com/example/repository/pull/1",
+                )
 
-            def finish_after_second_batch(_now):
-                nonlocal run_count
-                run_count += 1
-                if run_count == 2:
+            poll_count = 0
+
+            def stop_while_polling():
+                nonlocal poll_count
+                poll_count += 1
+                if poll_count == 2:
                     supervisor.stop_event.set()
-                return service.BatchOutcome(0, supervisor.config.max_urls, "pr_open")
+                    return True
+                return False
 
             with (
                 patch.object(service.signal, "signal"),
@@ -463,14 +617,45 @@ class FactoryServiceTests(unittest.TestCase):
                 patch.object(
                     supervisor,
                     "run_factory",
-                    side_effect=finish_after_second_batch,
+                    side_effect=finish_batch,
                 ) as run_factory,
+                patch.object(
+                    supervisor,
+                    "pending_pull_request_is_open",
+                    side_effect=stop_while_polling,
+                ),
                 patch.object(supervisor, "wait") as wait,
             ):
                 supervisor.run()
 
-        self.assertEqual(run_factory.call_count, 2)
-        wait.assert_not_called()
+        self.assertEqual(run_factory.call_count, 1)
+        self.assertEqual(
+            supervisor.state["pending_factory_pr_url"],
+            "https://github.com/example/repository/pull/1",
+        )
+        wait.assert_called_once_with(60)
+
+    def test_scheduled_mode_does_not_run_while_previous_pull_request_is_open(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(
+                self.config(Path(temporary), mode=service.SCHEDULED_MODE)
+            )
+            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+
+            def stop_after_wait(_seconds):
+                supervisor.stop_event.set()
+
+            with (
+                patch.object(service.signal, "signal"),
+                patch.object(service, "prepare_git_authentication"),
+                patch.object(supervisor, "pending_pull_request_is_open", return_value=True),
+                patch.object(supervisor, "run_factory") as run_factory,
+                patch.object(supervisor, "wait", side_effect=stop_after_wait) as wait,
+            ):
+                supervisor.run()
+
+        run_factory.assert_not_called()
+        wait.assert_called_once_with(60)
 
 
 if __name__ == "__main__":
