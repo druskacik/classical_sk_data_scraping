@@ -118,6 +118,7 @@ class PullRequestRepositoryTests(unittest.TestCase):
             "https://github.com/example/repository.git",
         ))
 
+
 class FactoryServiceTests(unittest.TestCase):
     def config(
         self,
@@ -484,7 +485,9 @@ class FactoryServiceTests(unittest.TestCase):
                     f'"headRefOid":"{HEAD_SHA}","isCrossRepository":false}}'
                 )
             )
-            with patch.object(service.subprocess, "run", return_value=response):
+            with (
+                patch.object(service.subprocess, "run", return_value=response),
+            ):
                 self.assertTrue(supervisor.pending_pull_request_is_open())
 
         self.assertIn("pending_factory_pr_url", supervisor.state)
@@ -501,9 +504,11 @@ class FactoryServiceTests(unittest.TestCase):
                 "headRefName": "crawler-factory/2026-08-07-example",
                 "headRefOid": HEAD_SHA, "isCrossRepository": False,
             }))
-            with patch.object(
-                service.subprocess, "run", side_effect=[response, Mock()]
-            ) as run:
+            with (
+                patch.object(
+                    service.subprocess, "run", side_effect=[response, Mock()]
+                ) as run,
+            ):
                 self.assertTrue(supervisor.pending_pull_request_is_open())
 
         self.assertEqual(run.call_count, 2)
@@ -527,7 +532,9 @@ class FactoryServiceTests(unittest.TestCase):
                 "headRefName": "crawler-factory/2026-08-07-example",
                 "headRefOid": HEAD_SHA, "isCrossRepository": False,
             }))
-            with patch.object(service.subprocess, "run", return_value=response) as run:
+            with (
+                patch.object(service.subprocess, "run", return_value=response) as run,
+            ):
                 self.assertTrue(supervisor.pending_pull_request_is_open())
 
         run.assert_called_once()
@@ -544,11 +551,17 @@ class FactoryServiceTests(unittest.TestCase):
                 "headRefName": "crawler-factory/2026-08-07-example",
                 "headRefOid": HEAD_SHA, "isCrossRepository": False,
             }))
-            with patch.object(
-                service.subprocess,
-                "run",
-                side_effect=[response, subprocess.CalledProcessError(1, "gh"), response],
-            ) as run:
+            with (
+                patch.object(
+                    service.subprocess,
+                    "run",
+                    side_effect=[
+                        response,
+                        subprocess.CalledProcessError(1, "gh"),
+                        response,
+                    ],
+                ) as run,
+            ):
                 self.assertTrue(supervisor.pending_pull_request_is_open())
                 self.assertTrue(supervisor.pending_pull_request_is_open())
 
@@ -591,7 +604,9 @@ class FactoryServiceTests(unittest.TestCase):
                     f'"headRefOid":"{HEAD_SHA}","isCrossRepository":false}}'
                 )
             )
-            with patch.object(service.subprocess, "run", return_value=response):
+            with (
+                patch.object(service.subprocess, "run", return_value=response),
+            ):
                 self.assertTrue(supervisor.pending_pull_request_is_open())
 
         self.assertIn("pending_factory_pr_url", supervisor.state)

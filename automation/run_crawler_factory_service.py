@@ -156,6 +156,11 @@ def pull_request_belongs_to_repository(pull_request_url: str, repository: str) -
     )
 
 
+def command_error_detail(exc: Exception) -> str:
+    stderr = getattr(exc, "stderr", None)
+    return str(stderr or exc).strip()
+
+
 @dataclass(frozen=True)
 class BatchOutcome:
     return_code: int
@@ -490,8 +495,7 @@ class FactoryService:
             )
         except Exception as exc:
             delay = self._record_pending_pr_update_failure(base_sha, now)
-            stderr = getattr(exc, "stderr", None)
-            detail = str(stderr or exc).strip()
+            detail = command_error_detail(exc)
             if "conflict" in detail.lower():
                 log(
                     "Crawler-factory pull request update has merge conflicts: "
@@ -613,11 +617,12 @@ class FactoryService:
                 self._last_pending_pr_observation = observation
             return True
         except Exception as exc:
-            observation = ("error", type(exc).__name__, str(exc))
+            detail = command_error_detail(exc)
+            observation = ("error", type(exc).__name__, detail)
             if observation != self._last_pending_pr_observation:
                 log(
                     f"Could not check crawler-factory pull request {pull_request_url}: "
-                    f"{type(exc).__name__}: {exc}"
+                    f"{type(exc).__name__}: {detail}"
                 )
                 self._last_pending_pr_observation = observation
             return True
