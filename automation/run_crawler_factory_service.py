@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import logging
 import signal
@@ -47,6 +48,14 @@ def log(message: str) -> None:
         event = "factory_batch_started"
     elif message.startswith("Crawler-factory batch finished"):
         event = "factory_batch_completed"
+    elif message.startswith("Waiting for crawler-factory pull request"):
+        event = "factory_pr_waiting"
+    elif message.startswith("Crawler-factory pull request merged"):
+        event = "factory_pr_merged"
+    elif message.startswith("Crawler-factory pull request closed without merging"):
+        event = "factory_pr_closed_unmerged"
+    elif message.startswith("Could not check crawler-factory pull request"):
+        event = "factory_pr_check_failed"
     elif message.startswith("Crawler-only master update"):
         event = "factory_crawler_only_update"
     elif message.startswith("Factory-relevant master update"):
@@ -57,7 +66,11 @@ def log(message: str) -> None:
         event = "factory_service_signal_received"
     elif message == "Stopped":
         event = "factory_service_stopped"
-    level = logging.WARNING if event.endswith(("_failed", "_invalid", "_disabled")) else logging.INFO
+    level = (
+        logging.WARNING
+        if event.endswith(("_failed", "_invalid", "_disabled", "_closed_unmerged"))
+        else logging.INFO
+    )
     logger.log(level, message, extra={"event": event})
 
 
@@ -122,6 +135,7 @@ class BatchOutcome:
     return_code: int
     claimed_count: int | None
     status: str | None
+    pull_request_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +147,7 @@ class ServiceConfig:
     update_interval_seconds: int
     idle_interval_seconds: int
     failure_backoff_seconds: int
+    pr_poll_interval_seconds: int
     deploy_webhook: str | None
     max_urls: int
     timeout_minutes: int
@@ -165,6 +180,10 @@ class ServiceConfig:
             failure_backoff_seconds=positive_integer(
                 os.getenv("CRAWLER_FACTORY_FAILURE_BACKOFF_MINUTES", "15"),
                 "CRAWLER_FACTORY_FAILURE_BACKOFF_MINUTES",
+            ) * 60,
+            pr_poll_interval_seconds=positive_integer(
+                os.getenv("CRAWLER_FACTORY_PR_POLL_INTERVAL_MINUTES", "1"),
+                "CRAWLER_FACTORY_PR_POLL_INTERVAL_MINUTES",
             ) * 60,
             deploy_webhook=os.getenv("CRAWLER_FACTORY_DEPLOY_WEBHOOK") or None,
             max_urls=positive_integer(
@@ -232,6 +251,7 @@ class FactoryService:
         self.child: subprocess.Popen | None = None
         self.deployment_pending = False
         self.update_check_conclusive = True
+        self._last_pending_pr_observation: tuple[str, ...] | None = None
 
     def stop(self, signum: int, _frame: object = None) -> None:
         log(f"Received signal {signum}; stopping")
@@ -278,10 +298,18 @@ class FactoryService:
                 payload = load_state(result_path, log)
                 claimed_count = int(payload["claimed_count"])
                 status = str(payload["status"])
+                raw_pr_url = payload.get("pull_request_url")
+                pull_request_url = str(raw_pr_url) if raw_pr_url else None
             except (KeyError, TypeError, ValueError):
                 claimed_count = None
                 status = None
-            return BatchOutcome(self.child.returncode, claimed_count, status)
+                pull_request_url = None
+            return BatchOutcome(
+                self.child.returncode,
+                claimed_count,
+                status,
+                pull_request_url,
+            )
         finally:
             return_code = self.child.returncode
             self.child = None
@@ -339,6 +367,83 @@ class FactoryService:
     def wait(self, seconds: int) -> None:
         self.stop_event.wait(seconds)
 
+    def remember_pending_pull_request(self, pull_request_url: str) -> None:
+        self.state["pending_factory_pr_url"] = pull_request_url
+        self.updater.save_state()
+        self._last_pending_pr_observation = None
+
+    def clear_pending_pull_request(self) -> None:
+        self.state.pop("pending_factory_pr_url", None)
+        self.updater.save_state()
+        self._last_pending_pr_observation = None
+
+    def pending_pull_request_is_open(self) -> bool:
+        pull_request_url = self.state.get("pending_factory_pr_url")
+        if not pull_request_url:
+            self._last_pending_pr_observation = None
+            return False
+        try:
+            result = subprocess.run(
+                [
+                    "gh",
+                    "pr",
+                    "view",
+                    str(pull_request_url),
+                    "--json",
+                    "state,mergedAt,mergeStateStatus,statusCheckRollup",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            payload = json.loads(result.stdout)
+            if not isinstance(payload, dict):
+                raise ValueError("GitHub response is not an object")
+            state = str(payload.get("state") or "").upper()
+            merged_at = payload.get("mergedAt")
+            if merged_at:
+                log(f"Crawler-factory pull request merged: {pull_request_url}")
+                self.clear_pending_pull_request()
+                return False
+            if state == "CLOSED":
+                log(
+                    "Crawler-factory pull request closed without merging: "
+                    f"{pull_request_url}"
+                )
+                self.clear_pending_pull_request()
+                return False
+            if state != "OPEN":
+                raise ValueError(f"unexpected pull request state: {state or 'missing'}")
+            checks = payload.get("statusCheckRollup") or []
+            conclusions = sorted(
+                str(check.get("conclusion") or check.get("state") or "PENDING").upper()
+                for check in checks
+                if isinstance(check, dict)
+            )
+            observation = (
+                "open",
+                str(payload.get("mergeStateStatus") or "UNKNOWN").upper(),
+                *conclusions,
+            )
+            if observation != self._last_pending_pr_observation:
+                check_summary = ", ".join(conclusions) if conclusions else "no checks"
+                log(
+                    f"Waiting for crawler-factory pull request {pull_request_url} "
+                    f"(merge state: {observation[1]}; checks: {check_summary})"
+                )
+                self._last_pending_pr_observation = observation
+            return True
+        except Exception as exc:
+            observation = ("error", type(exc).__name__, str(exc))
+            if observation != self._last_pending_pr_observation:
+                log(
+                    f"Could not check crawler-factory pull request {pull_request_url}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                self._last_pending_pr_observation = observation
+            return True
+
     def run(self) -> None:
         signal.signal(signal.SIGTERM, self.stop)
         signal.signal(signal.SIGINT, self.stop)
@@ -356,6 +461,9 @@ class FactoryService:
                 f"{self.config.update_interval_seconds // 60} minutes"
             )
         while not self.stop_event.is_set():
+            if self.pending_pull_request_is_open():
+                self.wait(self.config.pr_poll_interval_seconds)
+                continue
             now = datetime.now(self.config.timezone)
             should_run = self.config.mode == CONTINUOUS_MODE or batch_is_due(
                 now, self.config.schedule_time, self.state
@@ -368,6 +476,9 @@ class FactoryService:
                 outcome = self.run_factory(now)
                 if self.stop_event.is_set():
                     break
+                if outcome.pull_request_url:
+                    self.remember_pending_pull_request(outcome.pull_request_url)
+                    continue
                 if self.config.mode == SCHEDULED_MODE:
                     self.check_for_update()
                     next_update_check = time.monotonic() + self.config.update_interval_seconds
