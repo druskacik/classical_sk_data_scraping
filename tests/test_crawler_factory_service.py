@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -13,6 +14,7 @@ import deployment.caprover_updater as caprover
 
 OLD_SHA = "a" * 40
 NEW_SHA = "b" * 40
+HEAD_SHA = "c" * 40
 
 
 class ServiceConfigTests(unittest.TestCase):
@@ -97,6 +99,25 @@ class ScheduleTests(unittest.TestCase):
         self.assertTrue(service.batch_is_due(now, service.parse_schedule("06:00"), state))
 
 
+class PullRequestRepositoryTests(unittest.TestCase):
+    def test_https_repository_matches_pull_request(self):
+        self.assertTrue(service.pull_request_belongs_to_repository(
+            "https://github.com/example/repository/pull/1",
+            "https://github.com/example/repository.git",
+        ))
+
+    def test_ssh_repository_matches_pull_request(self):
+        self.assertTrue(service.pull_request_belongs_to_repository(
+            "https://github.com/example/repository/pull/1",
+            "git@github.com:example/repository.git",
+        ))
+
+    def test_other_repository_does_not_match(self):
+        self.assertFalse(service.pull_request_belongs_to_repository(
+            "https://github.com/other/repository/pull/1",
+            "https://github.com/example/repository.git",
+        ))
+
 class FactoryServiceTests(unittest.TestCase):
     def config(
         self,
@@ -153,6 +174,7 @@ class FactoryServiceTests(unittest.TestCase):
                 "claimed_count": 5,
                 "status": "pr_open",
                 "pull_request_url": "https://github.com/example/repository/pull/1",
+                "base_commit_sha": OLD_SHA,
             }
             with (
                 patch.object(subprocess, "Popen", return_value=process),
@@ -168,6 +190,7 @@ class FactoryServiceTests(unittest.TestCase):
             result.pull_request_url,
             "https://github.com/example/repository/pull/1",
         )
+        self.assertEqual(result.base_commit_sha, OLD_SHA)
 
     def test_matching_commit_does_not_request_deployment(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -416,7 +439,9 @@ class FactoryServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             supervisor = service.FactoryService(self.config(root))
-            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            supervisor.remember_pending_pull_request(
+                "https://github.com/example/repository/pull/1", NEW_SHA
+            )
 
             def stop_after_wait(_seconds):
                 supervisor.stop_event.set()
@@ -424,7 +449,10 @@ class FactoryServiceTests(unittest.TestCase):
             response = Mock(
                 stdout=(
                     '{"state":"OPEN","mergedAt":null,"mergeStateStatus":"BEHIND",'
-                    '"statusCheckRollup":[]}'
+                    '"statusCheckRollup":[],"baseRefName":"master",'
+                    f'"baseRefOid":"{NEW_SHA}",'
+                    '"headRefName":"crawler-factory/example",'
+                    f'"headRefOid":"{HEAD_SHA}","isCrossRepository":false}}'
                 )
             )
             with (
@@ -443,11 +471,17 @@ class FactoryServiceTests(unittest.TestCase):
     def test_successful_but_unmerged_pull_request_keeps_waiting(self):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))
-            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            supervisor.remember_pending_pull_request(
+                "https://github.com/example/repository/pull/1", NEW_SHA
+            )
             response = Mock(
                 stdout=(
                     '{"state":"OPEN","mergedAt":null,"mergeStateStatus":"CLEAN",'
-                    '"statusCheckRollup":[{"conclusion":"SUCCESS"}]}'
+                    '"statusCheckRollup":[{"conclusion":"SUCCESS"}],'
+                    '"baseRefName":"master",'
+                    f'"baseRefOid":"{NEW_SHA}",'
+                    '"headRefName":"crawler-factory/example",'
+                    f'"headRefOid":"{HEAD_SHA}","isCrossRepository":false}}'
                 )
             )
             with patch.object(service.subprocess, "run", return_value=response):
@@ -455,14 +489,106 @@ class FactoryServiceTests(unittest.TestCase):
 
         self.assertIn("pending_factory_pr_url", supervisor.state)
 
+    def test_pending_pull_request_is_updated_when_master_advances(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            pr_url = "https://github.com/example/repository/pull/1"
+            supervisor.remember_pending_pull_request(pr_url, OLD_SHA)
+            response = Mock(stdout=json.dumps({
+                "state": "OPEN", "mergedAt": None, "mergeStateStatus": "BEHIND",
+                "statusCheckRollup": [], "baseRefName": "master",
+                "baseRefOid": NEW_SHA,
+                "headRefName": "crawler-factory/2026-08-07-example",
+                "headRefOid": HEAD_SHA, "isCrossRepository": False,
+            }))
+            with patch.object(
+                service.subprocess, "run", side_effect=[response, Mock()]
+            ) as run:
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["gh", "pr", "update-branch", pr_url],
+        )
+        self.assertEqual(supervisor.state["pending_factory_pr_base_sha"], NEW_SHA)
+        self.assertNotIn("pending_factory_pr_update_retry_at", supervisor.state)
+
+    def test_current_pending_pull_request_is_not_updated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor.remember_pending_pull_request(
+                "https://github.com/example/repository/pull/1", NEW_SHA
+            )
+            response = Mock(stdout=json.dumps({
+                "state": "OPEN", "mergedAt": None, "mergeStateStatus": "CLEAN",
+                "statusCheckRollup": [{"conclusion": "SUCCESS"}],
+                "baseRefName": "master", "baseRefOid": NEW_SHA,
+                "headRefName": "crawler-factory/2026-08-07-example",
+                "headRefOid": HEAD_SHA, "isCrossRepository": False,
+            }))
+            with patch.object(service.subprocess, "run", return_value=response) as run:
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+
+        run.assert_called_once()
+
+    def test_failed_pending_pull_request_update_is_backed_off_and_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            pr_url = "https://github.com/example/repository/pull/1"
+            supervisor.remember_pending_pull_request(pr_url, OLD_SHA)
+            response = Mock(stdout=json.dumps({
+                "state": "OPEN", "mergedAt": None, "mergeStateStatus": "DIRTY",
+                "statusCheckRollup": [], "baseRefName": "master",
+                "baseRefOid": NEW_SHA,
+                "headRefName": "crawler-factory/2026-08-07-example",
+                "headRefOid": HEAD_SHA, "isCrossRepository": False,
+            }))
+            with patch.object(
+                service.subprocess,
+                "run",
+                side_effect=[response, subprocess.CalledProcessError(1, "gh"), response],
+            ) as run:
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(supervisor.state["pending_factory_pr_base_sha"], OLD_SHA)
+        self.assertEqual(supervisor.state["pending_factory_pr_update_attempts"], 1)
+        self.assertIn("pending_factory_pr_update_retry_at", supervisor.state)
+
+    def test_unexpected_pending_pull_request_is_never_updated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+            supervisor.remember_pending_pull_request(
+                "https://github.com/example/repository/pull/1", OLD_SHA
+            )
+            response = Mock(stdout=json.dumps({
+                "state": "OPEN", "mergedAt": None, "mergeStateStatus": "BEHIND",
+                "statusCheckRollup": [], "baseRefName": "master",
+                "baseRefOid": NEW_SHA, "headRefName": "somebody-elses-branch",
+                "headRefOid": HEAD_SHA, "isCrossRepository": False,
+            }))
+            with patch.object(service.subprocess, "run", return_value=response) as run:
+                self.assertTrue(supervisor.pending_pull_request_is_open())
+
+        run.assert_called_once()
+        self.assertEqual(supervisor.state["pending_factory_pr_base_sha"], OLD_SHA)
+
     def test_failed_pull_request_keeps_waiting(self):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))
-            supervisor.remember_pending_pull_request("https://github.com/example/repository/pull/1")
+            supervisor.remember_pending_pull_request(
+                "https://github.com/example/repository/pull/1", NEW_SHA
+            )
             response = Mock(
                 stdout=(
                     '{"state":"OPEN","mergedAt":null,"mergeStateStatus":"BLOCKED",'
-                    '"statusCheckRollup":[{"conclusion":"FAILURE"}]}'
+                    '"statusCheckRollup":[{"conclusion":"FAILURE"}],'
+                    '"baseRefName":"master",'
+                    f'"baseRefOid":"{NEW_SHA}",'
+                    '"headRefName":"crawler-factory/example",'
+                    f'"headRefOid":"{HEAD_SHA}","isCrossRepository":false}}'
                 )
             )
             with patch.object(service.subprocess, "run", return_value=response):
@@ -487,6 +613,7 @@ class FactoryServiceTests(unittest.TestCase):
             restarted = service.FactoryService(config)
 
         self.assertNotIn("pending_factory_pr_url", restarted.state)
+        self.assertNotIn("pending_factory_pr_base_sha", restarted.state)
 
     def test_closed_unmerged_pull_request_clears_gate(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -598,6 +725,7 @@ class FactoryServiceTests(unittest.TestCase):
                     supervisor.config.max_urls,
                     "pr_open",
                     "https://github.com/example/repository/pull/1",
+                    OLD_SHA,
                 )
 
             poll_count = 0
@@ -633,6 +761,7 @@ class FactoryServiceTests(unittest.TestCase):
             supervisor.state["pending_factory_pr_url"],
             "https://github.com/example/repository/pull/1",
         )
+        self.assertEqual(supervisor.state["pending_factory_pr_base_sha"], OLD_SHA)
         wait.assert_called_once_with(60)
 
     def test_scheduled_mode_does_not_run_while_previous_pull_request_is_open(self):

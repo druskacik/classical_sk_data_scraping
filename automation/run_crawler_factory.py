@@ -85,6 +85,7 @@ def write_supervisor_result(
     results: list[dict],
     status: str,
     pull_request_url: str | None = None,
+    base_commit_sha: str | None = None,
 ) -> None:
     if path is None:
         return
@@ -99,6 +100,7 @@ def write_supervisor_result(
         "status_counts": status_counts,
         "status": status,
         "pull_request_url": pull_request_url,
+        "base_commit_sha": base_commit_sha,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(f"{path.suffix}.tmp")
@@ -929,6 +931,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
     results: list[dict] = []
     claimed_count = 0
     successful_source_ids: list[int] = []
+    base_commit_sha: str | None = None
     run_created = False
     supervisor_result_written = False
     try:
@@ -937,6 +940,9 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
         run_command(
             ["git", "clone", "--single-branch", "--branch", args.base_branch, args.repository, str(workspace)]
         )
+        base_commit_sha = run_command(
+            ["git", "rev-parse", "HEAD"], cwd=workspace
+        ).stdout.strip()
         today = datetime.now(UTC).date()
         branch = f"crawler-factory/{today.isoformat()}-{run_id[-8:]}"
         run_command(["git", "switch", "-c", branch], cwd=workspace)
@@ -1160,6 +1166,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
             results=results,
             status="pr_open",
             pull_request_url=pr_url,
+            base_commit_sha=base_commit_sha,
         )
         supervisor_result_written = True
     except Exception:
@@ -1172,6 +1179,7 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
                 claimed_count=claimed_count,
                 results=results,
                 status="failed",
+                base_commit_sha=base_commit_sha,
             )
         raise
     finally:

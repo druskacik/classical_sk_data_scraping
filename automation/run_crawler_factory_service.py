@@ -10,8 +10,9 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, time as wall_time
+from datetime import UTC, datetime, time as wall_time, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from observability import configure_logging
 
@@ -54,6 +55,14 @@ def log(message: str) -> None:
         event = "factory_pr_merged"
     elif message.startswith("Crawler-factory pull request closed without merging"):
         event = "factory_pr_closed_unmerged"
+    elif message.startswith("Updating crawler-factory pull request"):
+        event = "factory_pr_update_started"
+    elif message.startswith("Updated crawler-factory pull request"):
+        event = "factory_pr_update_succeeded"
+    elif message.startswith("Could not update crawler-factory pull request"):
+        event = "factory_pr_update_failed"
+    elif message.startswith("Crawler-factory pull request update has merge conflicts"):
+        event = "factory_pr_update_conflict"
     elif message.startswith("Could not check crawler-factory pull request"):
         event = "factory_pr_check_failed"
     elif message.startswith("Crawler-only master update"):
@@ -66,11 +75,10 @@ def log(message: str) -> None:
         event = "factory_service_signal_received"
     elif message == "Stopped":
         event = "factory_service_stopped"
-    level = (
-        logging.WARNING
-        if event.endswith(("_failed", "_invalid", "_disabled", "_closed_unmerged"))
-        else logging.INFO
-    )
+    level = logging.WARNING if (
+        event.endswith(("_failed", "_invalid", "_disabled", "_closed_unmerged"))
+        or event == "factory_pr_update_conflict"
+    ) else logging.INFO
     logger.log(level, message, extra={"event": event})
 
 
@@ -130,12 +138,31 @@ def changed_paths_between(repository: str, old_commit: str, new_commit: str) -> 
     return [line for line in result.stdout.splitlines() if line]
 
 
+def pull_request_belongs_to_repository(pull_request_url: str, repository: str) -> bool:
+    repository_value = repository.removesuffix(".git")
+    if repository_value.startswith("git@") and ":" in repository_value:
+        host_path = repository_value.removeprefix("git@").replace(":", "/", 1)
+        repository_value = f"https://{host_path}"
+    parsed_repository = urlparse(repository_value)
+    parsed_pull_request = urlparse(pull_request_url)
+    if not parsed_repository.netloc or not parsed_repository.path:
+        return False
+    return (
+        parsed_pull_request.scheme == parsed_repository.scheme
+        and parsed_pull_request.netloc == parsed_repository.netloc
+        and parsed_pull_request.path.startswith(
+            f"{parsed_repository.path.rstrip('/')}/pull/"
+        )
+    )
+
+
 @dataclass(frozen=True)
 class BatchOutcome:
     return_code: int
     claimed_count: int | None
     status: str | None
     pull_request_url: str | None = None
+    base_commit_sha: str | None = None
 
 
 @dataclass(frozen=True)
@@ -300,15 +327,23 @@ class FactoryService:
                 status = str(payload["status"])
                 raw_pr_url = payload.get("pull_request_url")
                 pull_request_url = str(raw_pr_url) if raw_pr_url else None
+                raw_base_sha = payload.get("base_commit_sha")
+                base_commit_sha = (
+                    normalize_commit_sha(str(raw_base_sha), "base_commit_sha")
+                    if raw_base_sha
+                    else None
+                )
             except (KeyError, TypeError, ValueError):
                 claimed_count = None
                 status = None
                 pull_request_url = None
+                base_commit_sha = None
             return BatchOutcome(
                 self.child.returncode,
                 claimed_count,
                 status,
                 pull_request_url,
+                base_commit_sha,
             )
         finally:
             return_code = self.child.returncode
@@ -367,15 +402,117 @@ class FactoryService:
     def wait(self, seconds: int) -> None:
         self.stop_event.wait(seconds)
 
-    def remember_pending_pull_request(self, pull_request_url: str) -> None:
+    def remember_pending_pull_request(
+        self,
+        pull_request_url: str,
+        base_commit_sha: str | None = None,
+    ) -> None:
         self.state["pending_factory_pr_url"] = pull_request_url
+        if base_commit_sha:
+            self.state["pending_factory_pr_base_sha"] = normalize_commit_sha(
+                base_commit_sha,
+                "pending pull request base SHA",
+            )
+        else:
+            self.state.pop("pending_factory_pr_base_sha", None)
+        self._clear_pending_pr_update_retry()
         self.updater.save_state()
         self._last_pending_pr_observation = None
 
     def clear_pending_pull_request(self) -> None:
-        self.state.pop("pending_factory_pr_url", None)
+        for key in (
+            "pending_factory_pr_url",
+            "pending_factory_pr_base_sha",
+            "pending_factory_pr_update_base_sha",
+            "pending_factory_pr_update_attempts",
+            "pending_factory_pr_update_retry_at",
+        ):
+            self.state.pop(key, None)
         self.updater.save_state()
         self._last_pending_pr_observation = None
+
+    def _clear_pending_pr_update_retry(self) -> None:
+        self.state.pop("pending_factory_pr_update_base_sha", None)
+        self.state.pop("pending_factory_pr_update_attempts", None)
+        self.state.pop("pending_factory_pr_update_retry_at", None)
+
+    def _pending_pr_update_is_due(self, base_sha: str, now: datetime) -> bool:
+        if self.state.get("pending_factory_pr_update_base_sha") != base_sha:
+            return True
+        try:
+            retry_at = datetime.fromisoformat(
+                str(self.state["pending_factory_pr_update_retry_at"])
+            )
+        except (KeyError, TypeError, ValueError):
+            return True
+        return retry_at.tzinfo is None or now >= retry_at
+
+    def _record_pending_pr_update_failure(
+        self,
+        base_sha: str,
+        now: datetime,
+    ) -> int:
+        if self.state.get("pending_factory_pr_update_base_sha") == base_sha:
+            attempts = int(self.state.get("pending_factory_pr_update_attempts", 0)) + 1
+        else:
+            attempts = 1
+        delay = min(
+            self.config.pr_poll_interval_seconds * (2 ** min(attempts - 1, 10)),
+            self.config.failure_backoff_seconds,
+        )
+        self.state["pending_factory_pr_update_base_sha"] = base_sha
+        self.state["pending_factory_pr_update_attempts"] = attempts
+        self.state["pending_factory_pr_update_retry_at"] = (
+            now + timedelta(seconds=delay)
+        ).isoformat()
+        self.updater.save_state()
+        return delay
+
+    def _update_pending_pull_request(
+        self,
+        pull_request_url: str,
+        base_sha: str,
+    ) -> None:
+        now = datetime.now(UTC)
+        if not self._pending_pr_update_is_due(base_sha, now):
+            return
+        log(
+            f"Updating crawler-factory pull request {pull_request_url} "
+            f"to master {base_sha[:12]}"
+        )
+        try:
+            subprocess.run(
+                ["gh", "pr", "update-branch", pull_request_url],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except Exception as exc:
+            delay = self._record_pending_pr_update_failure(base_sha, now)
+            stderr = getattr(exc, "stderr", None)
+            detail = str(stderr or exc).strip()
+            if "conflict" in detail.lower():
+                log(
+                    "Crawler-factory pull request update has merge conflicts: "
+                    f"{pull_request_url}; generated work is preserved; "
+                    f"retrying in {delay // 60} minutes"
+                )
+            else:
+                log(
+                    f"Could not update crawler-factory pull request {pull_request_url}: "
+                    f"{type(exc).__name__}: {detail}; "
+                    f"retrying in {delay // 60} minutes"
+                )
+            return
+        self.state["pending_factory_pr_base_sha"] = base_sha
+        self._clear_pending_pr_update_retry()
+        self.updater.save_state()
+        self._last_pending_pr_observation = None
+        log(
+            f"Updated crawler-factory pull request {pull_request_url} "
+            f"to master {base_sha[:12]}"
+        )
 
     def pending_pull_request_is_open(self) -> bool:
         pull_request_url = self.state.get("pending_factory_pr_url")
@@ -383,6 +520,11 @@ class FactoryService:
             self._last_pending_pr_observation = None
             return False
         try:
+            if not pull_request_belongs_to_repository(
+                str(pull_request_url),
+                self.config.repository,
+            ):
+                raise ValueError("pending pull request belongs to an unexpected repository")
             result = subprocess.run(
                 [
                     "gh",
@@ -390,7 +532,8 @@ class FactoryService:
                     "view",
                     str(pull_request_url),
                     "--json",
-                    "state,mergedAt,mergeStateStatus,statusCheckRollup",
+                    "state,mergedAt,mergeStateStatus,statusCheckRollup,"
+                    "baseRefName,baseRefOid,headRefName,headRefOid,isCrossRepository",
                 ],
                 check=True,
                 capture_output=True,
@@ -415,6 +558,41 @@ class FactoryService:
                 return False
             if state != "OPEN":
                 raise ValueError(f"unexpected pull request state: {state or 'missing'}")
+            base_ref = str(payload.get("baseRefName") or "")
+            head_ref = str(payload.get("headRefName") or "")
+            if (
+                base_ref != "master"
+                or not head_ref.startswith("crawler-factory/")
+                or payload.get("isCrossRepository") is not False
+            ):
+                raise ValueError(
+                    "refusing to update unexpected pull request "
+                    f"(base={base_ref or 'missing'}, head={head_ref or 'missing'}, "
+                    f"cross-repository={payload.get('isCrossRepository')!r})"
+                )
+            base_sha = normalize_commit_sha(
+                str(payload.get("baseRefOid") or ""),
+                "pull request base SHA",
+            )
+            normalize_commit_sha(
+                str(payload.get("headRefOid") or ""),
+                "pull request head SHA",
+            )
+            known_base_sha = self.state.get("pending_factory_pr_base_sha")
+            if known_base_sha is None:
+                merge_state = str(
+                    payload.get("mergeStateStatus") or "UNKNOWN"
+                ).upper()
+                if merge_state == "BEHIND":
+                    self._update_pending_pull_request(str(pull_request_url), base_sha)
+                else:
+                    self.state["pending_factory_pr_base_sha"] = base_sha
+                    self.updater.save_state()
+            elif normalize_commit_sha(
+                str(known_base_sha),
+                "pending pull request base SHA",
+            ) != base_sha:
+                self._update_pending_pull_request(str(pull_request_url), base_sha)
             checks = payload.get("statusCheckRollup") or []
             conclusions = sorted(
                 str(check.get("conclusion") or check.get("state") or "PENDING").upper()
@@ -477,7 +655,10 @@ class FactoryService:
                 if self.stop_event.is_set():
                     break
                 if outcome.pull_request_url:
-                    self.remember_pending_pull_request(outcome.pull_request_url)
+                    self.remember_pending_pull_request(
+                        outcome.pull_request_url,
+                        outcome.base_commit_sha,
+                    )
                     continue
                 if self.config.mode == SCHEDULED_MODE:
                     self.check_for_update()
