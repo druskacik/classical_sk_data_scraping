@@ -8,6 +8,10 @@ not interrupt active agents.
 
 SHA comparison, webhook delivery, retry state, and duplicate suppression are
 shared with the normal scraper runner through `deployment/caprover_updater.py`.
+The factory image pins GitHub CLI 2.94.0 from GitHub's official release package,
+verifies its architecture-specific SHA-256 checksum, and asserts the installed
+version during the build. When upgrading it, update the version and official
+package checksums together in `Dockerfile.crawler-factory`.
 
 Each batch clones `master` into a temporary directory, atomically claims at
 most five due sources from PostgreSQL, commits generated `main.py` or
