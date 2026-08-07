@@ -38,6 +38,7 @@ The defaults baked into `Dockerfile.crawler-factory` are:
 - run continuously, one batch at a time;
 - process at most five URLs per batch;
 - give each Codex generation 60 minutes;
+- after opening a pull request, poll it every minute and wait until it is merged or closed;
 - poll for eligible work every five minutes when a batch claims fewer than five sources;
 - back off for 15 minutes after a batch-level failure.
 
@@ -46,7 +47,15 @@ In scheduled mode the supervisor stores `last_factory_attempt_date` in
 `/var/lib/crawler-factory/service-state.json` before starting a batch and runs
 at `06:00` in `Europe/Prague` by default.
 
-The batch runs as a synchronous child process. Before starting another batch,
+The batch runs as a synchronous child process. When a batch opens a pull request,
+the supervisor persists its URL and will not start another batch while that pull
+request remains open. This includes pull requests with pending, missing, successful,
+or failed checks and pull requests that are behind `master`. The gate survives
+container restarts. A merged pull request is classified by the existing update
+check before work resumes; a pull request closed without merging clears the gate
+and is left to the existing source reconciliation flow.
+
+Before starting another batch,
 the supervisor compares the latest unclassified `master` SHA with the previous
 one. Changes entirely below `crawlers/` are recorded without redeploying because
 each batch clones current `master`. Any other change drains the service and
@@ -108,6 +117,7 @@ Set these in **App Configs > Environmental Variables**:
 | `CRAWLER_FACTORY_UPDATE_INTERVAL_MINUTES` | `5` | drained deployment/update retry interval |
 | `CRAWLER_FACTORY_IDLE_INTERVAL_MINUTES` | `5` | delay after a batch claims fewer than five sources |
 | `CRAWLER_FACTORY_FAILURE_BACKOFF_MINUTES` | `15` | delay after a batch-level failure |
+| `CRAWLER_FACTORY_PR_POLL_INTERVAL_MINUTES` | `1` | interval while waiting for an open factory pull request |
 | `CRAWLER_FACTORY_MAX_URLS` | `5` | per-batch URL limit |
 | `CRAWLER_FACTORY_TIMEOUT_MINUTES` | `60` | per-URL Codex timeout |
 | `CRAWLER_FACTORY_VALIDATION_TIMEOUT_MINUTES` | `15` | per-crawler full-scrape validation timeout |
@@ -186,8 +196,8 @@ The persistent scheduler state and worker lock are:
 
 Source status, retry dates, URL aliases, crawler paths, runs, and attempts live
 in PostgreSQL. `service-state.json` contains deployment suppression state, the
-last classified `master` SHA, and the last scheduled attempt date when scheduled
-mode is used.
+last classified `master` SHA, the pending factory pull request URL when one is
+open, and the last scheduled attempt date when scheduled mode is used.
 
 ### Apply the initial source seed
 
