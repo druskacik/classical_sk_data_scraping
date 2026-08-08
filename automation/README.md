@@ -104,17 +104,22 @@ automatically.
 
 ### 2. Configure persistent directories
 
-In **App Configs > Persistent Directories**, create three separate persistent
-volume mappings:
+In **App Configs > Persistent Directories**, create three persistent volume
+mappings:
 
-| Container path | Purpose |
-|---|---|
-| `/var/lib/crawler-factory` | supervisor state, worker lock, and run reports |
-| `/factory-home` | isolated GitHub CLI home |
-| `/factory-codex-home` | Codex authentication and configuration |
+| Path in app | Storage | Purpose |
+|---|---|---|
+| `/var/lib/crawler-factory` | CapRover-managed label `crawler-factory-state` | supervisor state, worker lock, and run reports |
+| `/factory-home` | CapRover-managed label `crawler-factory-home` | isolated GitHub CLI home |
+| `/codex-home` | host path `/captain/data/codex-auth-crawler-factory` | factory-only Codex authentication and configuration |
 
-Use CapRover-managed volume labels and keep the app at one instance. These
-directories survive image rebuilds, deployments, and container replacement.
+Keep the app at one instance. These directories survive image rebuilds,
+deployments, and container replacement. The image already sets
+`CODEX_HOME=/codex-home`; do not configure `CODEX_HOME` in CapRover.
+
+Do not mount the normal `classical-bot` credential directory here. Each
+concurrent service must have its own `auth.json` so one process cannot rotate a
+refresh token while another process still holds the previous value.
 
 ### 3. Configure environment variables
 
@@ -157,18 +162,39 @@ runs but automatic updates are disabled with a warning.
 
 ### 4. Deploy and authenticate
 
-Trigger the first deployment from the CapRover dashboard. Once the service is
-running, authenticate Codex in the persistent Codex home. One option is to SSH
-to the CapRover server, locate the factory container, and run:
+Before starting the factory against an empty credential directory, keep the
+service scaled to zero and authenticate its persistent Codex home from the
+CapRover host. Create the host directory with restricted permissions:
 
 ```bash
-docker ps --filter name=captain--crawler-factory
-docker exec -it <container-id> codex login --device-auth
+sudo install -d -m 700 /captain/data/codex-auth-crawler-factory
 ```
 
-The exact service-name fragment follows the CapRover app name. Authentication
-is retained in `/factory-codex-home`, so later deployments do not require
-another login.
+Find the deployed factory image with `docker service inspect`, then use that
+image in a temporary container whose only job is device authentication:
+
+```bash
+docker run --rm -it \
+  -v /captain/data/codex-auth-crawler-factory:/codex-home \
+  CRAWLER_FACTORY_IMAGE \
+  codex login --device-auth
+```
+
+Verify the credentials with an authenticated request before scaling the
+factory up:
+
+```bash
+docker run --rm \
+  -v /captain/data/codex-auth-crawler-factory:/codex-home \
+  CRAWLER_FACTORY_IMAGE \
+  codex exec --json "Reply with exactly OK."
+```
+
+Replace `CRAWLER_FACTORY_IMAGE` with the exact deployed image name. The
+temporary containers are removed after each command, while the credentials
+remain in the host directory. Never print, commit, or repeatedly restore an
+older copy of `auth.json`. If authentication must be replaced, stop the factory
+before reauthenticating so it cannot claim sources during the transition.
 
 Inspect the app logs after authentication. Startup should report continuous
 batching and the idle interval. If eligible sources exist, the first batch
