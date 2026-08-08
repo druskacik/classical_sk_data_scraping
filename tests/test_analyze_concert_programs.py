@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from datetime import date, time
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent_utils import concert_catalog
@@ -276,6 +277,7 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         self.assertIn("c.date >= CURRENT_DATE", query)
         self.assertIn("a.attempts < %s", query)
         self.assertIn("make_interval(days => %s)", query)
+        self.assertIn("make_interval(hours => %s)", query)
         self.assertIn("a.status IN ('no_program', 'partial', 'ambiguous')", query)
         self.assertEqual(
             cursor.execute.call_args.args[1],
@@ -283,6 +285,9 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
                 analyzer.MAX_AUTOMATIC_ATTEMPTS,
                 analyzer.NO_PROGRAM_RETRY_INTERVAL_DAYS,
                 analyzer.MAX_AUTOMATIC_ATTEMPTS,
+                analyzer.NO_PROGRAM_RETRY_INTERVAL_DAYS,
+                analyzer.MAX_AUTOMATIC_ATTEMPTS,
+                analyzer.TECHNICAL_RETRY_INTERVAL_HOURS,
                 25,
             ),
         )
@@ -589,6 +594,21 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         worker_conn.commit.assert_not_called()
         coordinator_conn.close.assert_called_once()
         worker_conn.close.assert_called_once()
+
+    def test_committed_batch_refuses_advisory_lock_contention(self):
+        conn = MagicMock()
+        with tempfile.TemporaryDirectory() as temporary:
+            result_path = Path(temporary) / "batch-result.json"
+            with (
+                patch.object(analyzer, "get_connection", return_value=conn),
+                patch.object(analyzer, "acquire_lock", return_value=False),
+                self.assertRaisesRegex(RuntimeError, "already running"),
+            ):
+                analyzer.run(commit=True, limit=100, result_path=result_path)
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["status"], "fatal")
+        conn.close.assert_called_once()
 
     def test_output_schema_enforces_paired_entities(self):
         programme_group = analyzer.OUTPUT_SCHEMA["properties"]["programme_groups"]["items"]
@@ -914,15 +934,32 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
             with patch.dict(os.environ, {"CODEX_HOME": directory}):
                 asyncio.run(analyzer.validate_model(codex, "gpt-5.6-terra"))
 
-    def test_concurrency_defaults_to_sixteen_and_honors_cli_then_environment(self):
+    def test_concurrency_defaults_to_four_and_honors_cli_then_environment(self):
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(analyzer.resolve_concurrency(), 16)
+            self.assertEqual(analyzer.resolve_concurrency(), 4)
         with patch.dict(os.environ, {"CONCERT_PROGRAM_CONCURRENCY": "7"}):
             self.assertEqual(analyzer.resolve_concurrency(), 7)
             self.assertEqual(analyzer.resolve_concurrency(2), 2)
 
     def test_default_group_timeout_is_thirty_minutes(self):
         self.assertEqual(analyzer.DEFAULT_TIMEOUT_SECONDS, 1800)
+
+    def test_batch_result_is_written_atomically(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result_path = Path(temporary) / "batch-result.json"
+            analyzer.write_batch_result(
+                result_path,
+                status="completed",
+                selected_count=100,
+                group_count=60,
+                failure_count=2,
+            )
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["status"], "completed")
+        self.assertEqual(payload["selected_count"], 100)
+        self.assertEqual(payload["completed_count"], 98)
+        self.assertEqual(payload["failure_count"], 2)
 
     def test_cli_defaults_to_all_eligible_concerts(self):
         with patch("sys.argv", ["analyze_concert_programs"]):
@@ -1047,6 +1084,82 @@ class AnalyzeConcertProgramsTests(unittest.TestCase):
         with self.assertRaisesRegex(TimeoutError, "exceeded"):
             asyncio.run(analyzer.run_agent(codex, group, "gpt-5.6-terra", 0.01))
         turn.interrupt.assert_awaited_once()
+
+    def test_failed_timeout_interrupt_marks_codex_client_unhealthy(self):
+        codex = MagicMock()
+        codex.thread_start = AsyncMock()
+        thread = codex.thread_start.return_value
+        thread.turn = AsyncMock()
+        turn = thread.turn.return_value
+
+        async def never_finishes():
+            await asyncio.Event().wait()
+
+        turn.run = AsyncMock(side_effect=never_finishes)
+        turn.interrupt = AsyncMock(side_effect=RuntimeError("transport unavailable"))
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        group = analyzer.ConcertGroup(("Example", "test", "https://example.test"), (concert,))
+
+        with self.assertRaises(analyzer.CodexClientUnhealthyError):
+            asyncio.run(analyzer.run_agent(codex, group, "gpt-5.6-terra", 0.01))
+
+    def test_timeout_interrupt_is_itself_bounded(self):
+        codex = MagicMock()
+        codex.thread_start = AsyncMock()
+        thread = codex.thread_start.return_value
+        thread.turn = AsyncMock()
+        turn = thread.turn.return_value
+
+        async def never_finishes():
+            await asyncio.Event().wait()
+
+        turn.run = AsyncMock(side_effect=never_finishes)
+        turn.interrupt = AsyncMock(side_effect=never_finishes)
+        concert = analyzer.Concert(1, "Test", date.today(), "https://example.test", None)
+        group = analyzer.ConcertGroup(("Example", "test", "https://example.test"), (concert,))
+
+        with (
+            patch.object(analyzer, "INTERRUPT_TIMEOUT_SECONDS", 0.01),
+            self.assertRaises(analyzer.CodexClientUnhealthyError),
+        ):
+            asyncio.run(analyzer.run_agent(codex, group, "gpt-5.6-terra", 0.01))
+
+    def test_batch_heartbeat_is_written_on_start_and_group_terminal_state(self):
+        concert = analyzer.Concert(
+            1, "Test", date.today(), "https://example.test", None,
+            source="Example", source_url="https://example.test",
+        )
+        groups = analyzer.group_concerts([concert])
+        codex_class = MagicMock()
+        codex_class.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        codex_class.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            heartbeat = Path(temporary) / "heartbeat"
+            with (
+                patch.object(analyzer, "AsyncCodex", codex_class),
+                patch.object(analyzer, "validate_model", new_callable=AsyncMock),
+                patch.object(
+                    analyzer,
+                    "run_agent",
+                    new=AsyncMock(return_value=no_program_group_result([concert])),
+                ),
+                patch.object(analyzer, "validate_and_persist_result"),
+                patch.object(Path, "touch", autospec=True) as touch,
+            ):
+                failures = asyncio.run(
+                    analyzer.run_concert_groups(
+                        groups,
+                        model="gpt-5.6-terra",
+                        commit=False,
+                        timeout_seconds=30,
+                        concurrency=1,
+                        heartbeat_path=heartbeat,
+                    )
+                )
+
+        self.assertEqual(failures, 0)
+        self.assertEqual(touch.call_count, 2)
 
     def test_one_concert_failure_does_not_cancel_siblings(self):
         concerts = [

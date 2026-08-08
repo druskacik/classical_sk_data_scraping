@@ -1,82 +1,81 @@
 from __future__ import annotations
 
-import os
+import json
 import logging
+import os
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
-from deployment.caprover_updater import CapRoverUpdater, CapRoverUpdaterConfig
 
-
-DEFAULT_REPOSITORY = "https://github.com/druskacik/classical_bot.git"
-DEFAULT_STATE_PATH = Path("/var/lib/classical-bot/deployment-state.json")
+DEFAULT_REQUEST_PATH = Path("/var/lib/classical-bot/update-check-request.json")
 logger = logging.getLogger(__name__)
 
 
-def log(message: str) -> None:
-    event = "scraper_update_status"
-    if message.startswith("Requested CapRover deployment"):
-        event = "deployment_requested"
-    elif message.startswith("Could not request CapRover deployment"):
-        event = "deployment_request_failed"
-    elif message.startswith("Could not check master"):
-        event = "deployment_check_failed"
-    elif message.startswith("Automatic updates disabled"):
-        event = "deployment_updates_disabled"
-    elif message.startswith("Ignoring unreadable deployment state"):
-        event = "deployment_state_invalid"
-    elif message.startswith("Daily pipeline started"):
-        event = "daily_pipeline_started"
-    elif message.startswith("Daily pipeline finished"):
-        event = "daily_pipeline_finished"
-    level = logging.WARNING if event.endswith(("_failed", "_invalid", "_disabled")) else logging.INFO
-    logger.log(level, message, extra={"event": event})
+def log(message: str, *, error: bool = False) -> None:
+    logger.log(
+        logging.ERROR if error else logging.INFO,
+        message,
+        extra={
+            "event": "daily_update_check_request_failed"
+            if error
+            else "daily_update_check_requested"
+        },
+    )
 
 
 @dataclass(frozen=True)
 class UpdaterConfig:
-    repository: str
-    deploy_webhook: str | None
-    state_path: Path
+    request_path: Path
 
     @classmethod
     def from_environment(cls) -> UpdaterConfig:
         return cls(
-            repository=os.getenv("SCRAPER_REPOSITORY", DEFAULT_REPOSITORY),
-            deploy_webhook=os.getenv("SCRAPER_DEPLOY_WEBHOOK") or None,
-            state_path=Path(os.getenv("SCRAPER_DEPLOY_STATE_PATH", str(DEFAULT_STATE_PATH))),
+            request_path=Path(
+                os.getenv("SCRAPER_UPDATE_REQUEST_PATH", str(DEFAULT_REQUEST_PATH))
+            )
         )
 
 
 class ScraperUpdater:
+    """Notify the parent service that the daily pipeline permits an update check."""
+
     def __init__(self, config: UpdaterConfig) -> None:
-        self.updater = CapRoverUpdater(
-            CapRoverUpdaterConfig(
-                repository=config.repository,
-                deploy_webhook=config.deploy_webhook,
-                webhook_environment_name="SCRAPER_DEPLOY_WEBHOOK",
-                state_path=config.state_path,
-            ),
-            log,
-        )
+        self.config = config
         self.pipeline_active = False
-        self.updates_enabled = False
+        self.request_pending = False
 
     def begin_daily_pipeline(self) -> None:
         self.pipeline_active = True
-        self.updates_enabled = False
-        log("Daily pipeline started; automatic deployment is paused")
+        self.request_pending = False
+        logger.info(
+            "Daily pipeline started; automatic deployment is paused",
+            extra={"event": "daily_pipeline_started"},
+        )
 
     def finish_daily_pipeline(self) -> None:
         self.pipeline_active = False
-        self.updates_enabled = True
-        log("Daily pipeline finished; checking master for an update")
-        self.check_for_update()
+        self.request_pending = True
+        logger.info(
+            "Daily pipeline finished; requesting an update check",
+            extra={"event": "daily_pipeline_finished"},
+        )
+        self.request_update_check()
 
-    def check_for_update(self) -> bool:
-        if self.pipeline_active or not self.updates_enabled:
+    def request_update_check(self) -> bool:
+        if self.pipeline_active or not self.request_pending:
             return False
-        checked = self.updater.check_for_update()
-        if self.updater.last_check_conclusive:
-            self.updates_enabled = False
-        return checked
+        try:
+            self.config.request_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.config.request_path.with_suffix(".tmp")
+            temporary.write_text(
+                json.dumps({"requested_at": datetime.now(UTC).isoformat()}) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(self.config.request_path)
+        except OSError as error:
+            log(f"Could not request an update check: {type(error).__name__}: {error}", error=True)
+            return False
+        self.request_pending = False
+        log("Requested an update check after the daily pipeline")
+        return True

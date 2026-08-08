@@ -6,10 +6,12 @@ Crawlers for classical music concerts websites.
 
 The repository deploys two independent CapRover services:
 
-- `classical-bot` is the normal concert pipeline. It is built from
-  `Dockerfile`, applies database migrations, and starts `python main.py` to run
-  the scheduled crawlers and analyzers. Its persistent runtime state is stored
-  under `/var/lib/classical-bot`.
+- `classical-bot` is the normal concert pipeline. It is built from the default
+  `Dockerfile`, applies database migrations, and starts `python main.py`. The
+  app supervises the daily crawler/classifier scheduler and a continuous
+  programme analyzer as independent components, so scraping does not wait for
+  programme extraction. Its persistent runtime state is stored under
+  `/var/lib/classical-bot`.
 - `classical-crawler-factory` creates and validates crawler changes with Codex.
   Its CapRover deployment uses `captain-definition-crawler-factory`, which
   selects `Dockerfile.crawler-factory`, and starts
@@ -19,6 +21,13 @@ The repository deploys two independent CapRover services:
 The factory can publish crawler changes, but it does not run the production
 concert-scraping pipeline. See `automation/README.md` for its deployment and
 runtime details.
+
+The in-app programme analyzer defaults to batches of 100 concerts with
+concurrency 4. It immediately continues after a full batch and waits five
+minutes after draining the eligible queue. Fatal batches back off for fifteen
+minutes; stalled batch processes are terminated without stopping the daily
+scraper scheduler. Deployments normally wait for the active analyzer batch to
+finish, with a one-hour maximum drain period.
 
 Structure:
 

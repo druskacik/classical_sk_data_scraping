@@ -3,6 +3,7 @@ import time
 import importlib
 import logging
 import os
+import sys
 from pathlib import Path
 
 from deployment.scraper_updater import ScraperUpdater, UpdaterConfig
@@ -47,16 +48,14 @@ def run_job(main_function):
             extra={"event": "job_failed", "job": main_function.__name__},
         )
 
-if __name__ == "__main__":
+def scheduler_main() -> None:
     configure_logging("classical-bot")
     # Discover all crawler modules
     crawler_functions = discover_crawler_modules()
     
-    # Add the analyzer function
+    # Classify broad-source potential events after the crawlers.
     from analyzers.analyze_potential_events import main as analyze_potential_events_main
-    from analyzers.analyze_concert_programs import scheduled_main as analyze_concert_programs_main
     crawler_functions.append(analyze_potential_events_main)
-    crawler_functions.append(analyze_concert_programs_main)
     updater = ScraperUpdater(UpdaterConfig.from_environment())
     
     if should_run_jobs_on_startup():
@@ -89,8 +88,24 @@ if __name__ == "__main__":
     final_job_number = 1 + 2 * len(crawler_functions)
     final_time = f"{final_job_number // 60:02d}:{final_job_number % 60:02d}"
     schedule.every().day.at(final_time).do(updater.finish_daily_pipeline)
-    schedule.every(5).minutes.do(updater.check_for_update)
+    schedule.every(5).minutes.do(updater.request_update_check)
     
     while True:
         schedule.run_pending()
         time.sleep(1)
+
+
+def main() -> None:
+    if sys.argv[1:] == ["--scheduler-only"]:
+        scheduler_main()
+        return
+    if sys.argv[1:]:
+        raise SystemExit(f"Unknown arguments: {' '.join(sys.argv[1:])}")
+
+    from automation.run_classical_bot_service import main as service_main
+
+    service_main()
+
+
+if __name__ == "__main__":
+    main()

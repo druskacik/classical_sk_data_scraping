@@ -28,13 +28,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gpt-5.6-luna"
 DEFAULT_LIMIT: int | None = None
-DEFAULT_CONCURRENCY = 16
+DEFAULT_CONCURRENCY = 4
 DEFAULT_TIMEOUT_SECONDS = 1800
+INTERRUPT_TIMEOUT_SECONDS = 15
 POSTGRES_KEEPALIVES_IDLE_SECONDS = 60
 POSTGRES_KEEPALIVES_INTERVAL_SECONDS = 20
 POSTGRES_KEEPALIVES_COUNT = 3
 MAX_AUTOMATIC_ATTEMPTS = 3
 NO_PROGRAM_RETRY_INTERVAL_DAYS = 7
+TECHNICAL_RETRY_INTERVAL_HOURS = 1
 ADVISORY_LOCK_NAME = "classical-sk-concert-program-analysis"
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "analyze_concert_program.mustache"
 EVENT_UPDATE_FIELDS = (
@@ -45,6 +47,11 @@ EVENT_UPDATE_FIELDS = (
     "venue",
 )
 EVENT_STATUSES = ("scheduled", "cancelled", "postponed", "rescheduled")
+
+
+class CodexClientUnhealthyError(RuntimeError):
+    """Raised when a timed-out Codex turn cannot be interrupted safely."""
+
 
 PROGRAMME_RESULT_PROPERTIES: dict[str, Any] = {
     "status": {
@@ -356,7 +363,16 @@ def select_concerts(
                       AND a.attempts < %s
                       AND a.last_attempted_at <= now() - make_interval(days => %s)
                     )
-                    OR (a.status IN ('page_unavailable', 'error') AND a.attempts < %s)
+                    OR (
+                      a.status = 'page_unavailable'
+                      AND a.attempts < %s
+                      AND a.last_attempted_at <= now() - make_interval(days => %s)
+                    )
+                    OR (
+                      a.status = 'error'
+                      AND a.attempts < %s
+                      AND a.last_attempted_at <= now() - make_interval(hours => %s)
+                    )
                   )
                 ORDER BY c.date, c.id
                 LIMIT %s
@@ -365,6 +381,9 @@ def select_concerts(
                     MAX_AUTOMATIC_ATTEMPTS,
                     NO_PROGRAM_RETRY_INTERVAL_DAYS,
                     MAX_AUTOMATIC_ATTEMPTS,
+                    NO_PROGRAM_RETRY_INTERVAL_DAYS,
+                    MAX_AUTOMATIC_ATTEMPTS,
+                    TECHNICAL_RETRY_INTERVAL_HOURS,
                     limit,
                 ),
             )
@@ -447,8 +466,11 @@ async def run_agent(
         result = await asyncio.wait_for(turn.run(), timeout=timeout_seconds)
     except TimeoutError:
         try:
-            await turn.interrupt()
-        except Exception:
+            await asyncio.wait_for(
+                turn.interrupt(),
+                timeout=INTERRUPT_TIMEOUT_SECONDS,
+            )
+        except Exception as interrupt_error:
             logger.exception(
                 "Could not interrupt timed-out Codex turn",
                 extra={
@@ -456,6 +478,9 @@ async def run_agent(
                     "concert_ids": [concert.id for concert in group.concerts],
                 },
             )
+            raise CodexClientUnhealthyError(
+                "Timed-out Codex turn could not be interrupted safely"
+            ) from interrupt_error
         raise TimeoutError(
             f"Concert group programme analysis exceeded {timeout_seconds} seconds"
         )
@@ -1096,6 +1121,35 @@ def release_lock(conn) -> None:
         cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", (ADVISORY_LOCK_NAME,))
 
 
+def write_batch_result(
+    path: Path | None,
+    *,
+    status: str,
+    selected_count: int,
+    group_count: int,
+    failure_count: int | None,
+    error: Exception | None = None,
+) -> None:
+    if path is None:
+        return
+    payload: dict[str, Any] = {
+        "status": status,
+        "selected_count": selected_count,
+        "group_count": group_count,
+        "completed_count": (
+            selected_count - failure_count if failure_count is not None else None
+        ),
+        "failure_count": failure_count,
+    }
+    if error is not None:
+        payload["error_type"] = type(error).__name__
+        payload["error_message"] = str(error)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
 def validate_and_persist_result(
     concert: Concert,
     result: dict[str, Any],
@@ -1161,7 +1215,7 @@ async def analyze_concert_group(
         try:
             group_result = await run_agent(codex, group, model, timeout_seconds)
             expanded = expand_group_result(group, group_result)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, CodexClientUnhealthyError):
             raise
         except Exception as error:
             logger.exception(
@@ -1265,6 +1319,7 @@ async def run_concert_groups(
     commit: bool,
     timeout_seconds: int,
     concurrency: int,
+    heartbeat_path: Path | None = None,
 ) -> int:
     started_at = monotonic()
     logger.info(
@@ -1277,24 +1332,35 @@ async def run_concert_groups(
             "commit": commit,
         },
     )
+    heartbeat = lambda: heartbeat_path.touch() if heartbeat_path is not None else None
+    heartbeat()
     semaphore = asyncio.Semaphore(concurrency)
+
+    async def run_group(group: ConcertGroup) -> int:
+        try:
+            return await analyze_concert_group(
+                codex,
+                semaphore,
+                group,
+                model,
+                commit,
+                timeout_seconds,
+            )
+        finally:
+            heartbeat()
+
     async with AsyncCodex(
         CodexConfig(codex_bin=os.getenv("CODEX_BIN"), cwd=str(Path.cwd()))
     ) as codex:
         await validate_model(codex, model)
-        results = await asyncio.gather(
-            *(
-                analyze_concert_group(
-                    codex,
-                    semaphore,
-                    group,
-                    model,
-                    commit,
-                    timeout_seconds,
-                )
-                for group in groups
-            )
-        )
+        tasks = [asyncio.create_task(run_group(group)) for group in groups]
+        try:
+            results = await asyncio.gather(*tasks)
+        except CodexClientUnhealthyError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
     failures = sum(results)
     selected_count = sum(len(group.concerts) for group in groups)
     logger.info(
@@ -1323,11 +1389,15 @@ def run(
     force: bool = False,
     unresolved_locations: bool = False,
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    heartbeat_path: Path | None = None,
+    result_path: Path | None = None,
 ) -> int:
     if concurrency < 1:
         raise ValueError(f"concurrency must be at least 1, got {concurrency}")
     conn = get_connection()
     locked = False
+    selected_count = 0
+    group_count = 0
     try:
         if commit:
             locked = acquire_lock(conn)
@@ -1335,22 +1405,50 @@ def run(
                 raise RuntimeError("Another committed concert programme analysis is already running")
             expire_old_no_program(conn)
         concerts = select_concerts(conn, concert_ids, limit, force, unresolved_locations)
+        selected_count = len(concerts)
         if not concerts:
             logger.info(
                 "No concerts eligible for programme analysis",
                 extra={"event": "programme_queue_empty"},
             )
+            write_batch_result(
+                result_path,
+                status="empty",
+                selected_count=0,
+                group_count=0,
+                failure_count=0,
+            )
             return 0
         groups = group_concerts(concerts)
-        return asyncio.run(
+        group_count = len(groups)
+        failures = asyncio.run(
             run_concert_groups(
                 groups,
                 model=model,
                 commit=commit,
                 timeout_seconds=timeout_seconds,
                 concurrency=concurrency,
+                heartbeat_path=heartbeat_path,
             )
         )
+        write_batch_result(
+            result_path,
+            status="completed",
+            selected_count=selected_count,
+            group_count=group_count,
+            failure_count=failures,
+        )
+        return failures
+    except Exception as error:
+        write_batch_result(
+            result_path,
+            status="fatal",
+            selected_count=selected_count,
+            group_count=group_count,
+            failure_count=None,
+            error=error,
+        )
+        raise
     finally:
         if locked:
             release_lock(conn)
@@ -1358,7 +1456,7 @@ def run(
 
 
 def scheduled_main() -> None:
-    configure_logging("classical-bot")
+    configure_logging()
     failures = run(commit=True, concurrency=resolve_concurrency())
     if failures:
         raise RuntimeError(f"{failures} concert programme analyses failed")
@@ -1383,6 +1481,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model", default=os.getenv("CONCERT_PROGRAM_CODEX_MODEL", DEFAULT_MODEL))
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--heartbeat-path", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--result-path", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--commit", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
@@ -1394,22 +1494,35 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    configure_logging("classical-bot")
+    configure_logging()
     args = parse_args()
     try:
         concurrency = resolve_concurrency(args.concurrency)
     except ValueError as error:
         raise SystemExit(f"Invalid concert programme concurrency: {error}") from error
-    failures = run(
-        concert_ids=args.concert_ids,
-        limit=args.limit,
-        concurrency=concurrency,
-        model=args.model,
-        commit=args.commit,
-        force=args.force,
-        unresolved_locations=args.unresolved_locations,
-        timeout_seconds=args.timeout_seconds,
-    )
+    try:
+        failures = run(
+            concert_ids=args.concert_ids,
+            limit=args.limit,
+            concurrency=concurrency,
+            model=args.model,
+            commit=args.commit,
+            force=args.force,
+            unresolved_locations=args.unresolved_locations,
+            timeout_seconds=args.timeout_seconds,
+            heartbeat_path=args.heartbeat_path,
+            result_path=args.result_path,
+        )
+    except Exception as error:
+        write_batch_result(
+            args.result_path,
+            status="fatal",
+            selected_count=0,
+            group_count=0,
+            failure_count=None,
+            error=error,
+        )
+        raise
     if failures:
         raise SystemExit(1)
 
