@@ -600,6 +600,35 @@ class AttemptTests(unittest.TestCase):
         "crawler_path": "crawlers/cz/hamu_cz",
     }
 
+    def test_builder_auth_failure_is_reported_before_scope_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            run_dir = root / "runs"
+            workspace.mkdir()
+            run_dir.mkdir()
+
+            def fake_run_command(command, **_kwargs):
+                report = Path(command[command.index("--results") + 1])
+                report.write_text(
+                    json.dumps(
+                        [{
+                            "status": "auth_required",
+                            "auth_reason_code": "refresh_token_revoked",
+                            "error": "Codex authentication is required",
+                        }]
+                    ),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(command, 1, "", "")
+
+            with patch.object(factory, "run_command", side_effect=fake_run_command):
+                result = attempt_source(workspace, run_dir, self.SOURCE, 30, {})
+
+        self.assertEqual(result["status"], "auth_required")
+        self.assertEqual(result["auth_reason_code"], "refresh_token_revoked")
+        self.assertEqual(result["failure_stage"], "builder")
+
     def test_untracked_scratch_artifact_is_cleaned_before_validation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

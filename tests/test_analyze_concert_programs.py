@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from agent_utils import concert_catalog
 from agent_utils.concert_catalog import normalize
 from analyzers import analyze_concert_programs as analyzer
+from automation.codex_auth import CodexAuthRequiredError
 
 
 def not_needed_location():
@@ -42,6 +43,29 @@ def no_program_group_result(concerts):
 
 
 class AnalyzeConcertProgramsTests(unittest.TestCase):
+    def test_auth_failure_stops_group_without_persisting_concert_error(self):
+        concert = analyzer.Concert(
+            1, "Test", date.today(), "https://example.test/event", None,
+            source="Example", source_url="https://example.test",
+        )
+        group = analyzer.group_concerts([concert])[0]
+        with (
+            patch.object(
+                analyzer,
+                "run_agent",
+                new_callable=AsyncMock,
+                side_effect=CodexAuthRequiredError("refresh_token_revoked"),
+            ),
+            patch.object(analyzer, "persist_concert_error") as persist_error,
+            self.assertRaises(CodexAuthRequiredError),
+        ):
+            asyncio.run(
+                analyzer.analyze_concert_group(
+                    MagicMock(), asyncio.Semaphore(1), group, "model", True, 30
+                )
+            )
+        persist_error.assert_not_called()
+
     @patch.object(analyzer.psycopg2, "connect")
     def test_database_connections_detect_disappeared_clients_quickly(self, connect):
         with patch.dict(

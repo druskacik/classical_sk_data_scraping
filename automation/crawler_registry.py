@@ -496,6 +496,42 @@ class CrawlerRegistry:
             )
         self.connection.commit()
 
+    def abandon_attempt(
+        self,
+        source_id: int,
+        attempt_id: int,
+        *,
+        error: str,
+    ) -> None:
+        try:
+            with self.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE crawler_source_attempt
+                    SET outcome = 'abandoned', error = %s, retry_after = now(),
+                        finished_at = now()
+                    WHERE id = %s AND crawler_source_id = %s AND outcome = 'running'
+                    """,
+                    (error, attempt_id, source_id),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("expected one running crawler attempt to abandon")
+                cursor.execute(
+                    """
+                    UPDATE crawler_source
+                    SET status = 'retry_wait', next_attempt_at = now(),
+                        lease_owner = NULL, lease_expires_at = NULL, updated_at = now()
+                    WHERE id = %s AND status = 'processing'
+                    """,
+                    (source_id,),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("expected one processing crawler source to release")
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
+
     def mark_pr_open(self, run_id: str, source_ids: list[int], pr_url: str) -> None:
         if not source_ids:
             return

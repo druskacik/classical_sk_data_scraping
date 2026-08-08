@@ -16,6 +16,8 @@ from analyzers.programme_supervisor import (
     ProgrammeAnalysisSupervisor,
     ProgrammeSupervisorConfig,
 )
+from automation.codex_auth import CodexAuthPause
+from automation.notifications import Notification, send_notification
 from observability import configure_logging
 
 
@@ -97,13 +99,14 @@ class BatchOutcome:
     group_count: int | None
     completed_count: int | None
     failure_count: int | None
+    auth_reason_code: str | None = None
 
 
 def load_batch_result(path: Path, return_code: int) -> BatchOutcome:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         status = str(payload["status"])
-        if status not in {"empty", "completed", "fatal"}:
+        if status not in {"empty", "completed", "fatal", "auth_required"}:
             raise ValueError(f"unexpected batch status {status!r}")
 
         def optional_integer(name: str) -> int | None:
@@ -122,6 +125,11 @@ def load_batch_result(path: Path, return_code: int) -> BatchOutcome:
             group_count=optional_integer("group_count"),
             completed_count=optional_integer("completed_count"),
             failure_count=optional_integer("failure_count"),
+            auth_reason_code=(
+                str(payload["auth_reason_code"])
+                if payload.get("auth_reason_code")
+                else None
+            ),
         )
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return BatchOutcome(return_code, None, None, None, None, None)
@@ -136,6 +144,7 @@ class ProgrammeAnalyzerWorker:
         drain_event: threading.Event | None = None,
         before_batch: Callable[[], None] | None = None,
         result_path: Path | None = None,
+        auth_pause_path: Path | None = None,
     ) -> None:
         self.config = config
         self.stop_event = stop_event or threading.Event()
@@ -150,6 +159,7 @@ class ProgrammeAnalyzerWorker:
         self.result_path = result_path or Path(tempfile.gettempdir()) / (
             f"classical-programme-analysis-{os.getpid()}.result.json"
         )
+        self.auth_pause = CodexAuthPause.for_service("classical-bot", auth_pause_path)
 
     def stop(self, signum: int | None = None, _frame: object = None) -> None:
         if signum is not None:
@@ -195,6 +205,44 @@ class ProgrammeAnalyzerWorker:
                 break
             self.stop_event.wait(min(1, remaining))
 
+    def wait_for_authentication(self) -> None:
+        state = self.auth_pause.load() or {}
+        logger.warning(
+            "Programme analysis is paused until Codex is reauthenticated",
+            extra={
+                "event": "codex_auth_pause_active",
+                "component": "programme-analyzer",
+                "reason_code": state.get("reason_code", "unknown"),
+            },
+        )
+        if self.auth_pause.auth_file_changed():
+            resumed, failure = self.auth_pause.verify_and_resume(cwd=Path.cwd())
+            if resumed:
+                logger.info(
+                    "Codex authentication verified; programme analysis resumed",
+                    extra={
+                        "event": "codex_auth_restored",
+                        "component": "programme-analyzer",
+                    },
+                )
+                send_notification(
+                    Notification(
+                        title="Codex authentication restored",
+                        message="Programme analysis authentication was verified and processing resumed.",
+                        severity="info",
+                    )
+                )
+                return
+            logger.warning(
+                "Codex authentication recovery check did not succeed",
+                extra={
+                    "event": "codex_auth_recovery_failed",
+                    "component": "programme-analyzer",
+                    "reason_code": failure,
+                },
+            )
+        self.wait(60)
+
     def run(self) -> None:
         log(
             "Running continuous programme analysis "
@@ -203,6 +251,9 @@ class ProgrammeAnalyzerWorker:
         )
         try:
             while not self.stop_event.is_set() and not self.drain_event.is_set():
+                if self.auth_pause.is_paused():
+                    self.wait_for_authentication()
+                    continue
                 if self.before_batch is not None:
                     self.before_batch()
                 if self.drain_event.is_set():
@@ -218,6 +269,32 @@ class ProgrammeAnalyzerWorker:
                             f"checking again in {self.config.idle_interval_seconds} seconds"
                         )
                         self.wait(self.config.idle_interval_seconds)
+                    continue
+                if outcome.status == "auth_required":
+                    created = self.auth_pause.pause(
+                        outcome.auth_reason_code or "login_required",
+                        {"component": "programme-analyzer"},
+                    )
+                    if created:
+                        logger.critical(
+                            "Programme analysis entered persistent Codex authentication pause",
+                            extra={
+                                "event": "codex_auth_required",
+                                "component": "programme-analyzer",
+                                "reason_code": outcome.auth_reason_code or "login_required",
+                            },
+                        )
+                        send_notification(
+                            Notification(
+                                title="Codex authentication required",
+                                message=(
+                                    "Programme analysis stopped without consuming concert attempts. "
+                                    "Reauthenticate the classical-bot Codex credential directory. "
+                                    f"Reason: {outcome.auth_reason_code or 'login_required'}."
+                                ),
+                                severity="critical",
+                            )
+                        )
                     continue
                 log(
                     "Programme analysis batch failed; retrying after "

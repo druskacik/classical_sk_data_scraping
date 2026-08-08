@@ -102,6 +102,34 @@ class ProgrammeAnalyzerWorkerTests(unittest.TestCase):
         ):
             worker.run()
 
+    def test_auth_required_batch_enters_persistent_pause_without_retrying(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            pause_path = Path(temporary) / "auth-required.json"
+            worker = worker_module.ProgrammeAnalyzerWorker(
+                self.config(), auth_pause_path=pause_path
+            )
+
+            def wait_then_stop(seconds):
+                self.assertEqual(seconds, 60)
+                worker.stop_event.set()
+
+            with (
+                patch.object(
+                    worker,
+                    "run_batch",
+                    return_value=worker_module.BatchOutcome(
+                        1, "auth_required", 10, 10, None, None,
+                        "refresh_token_revoked",
+                    ),
+                ) as run_batch,
+                patch.object(worker, "wait", side_effect=wait_then_stop),
+                patch.object(worker.supervisor, "stop"),
+            ):
+                worker.run()
+
+            self.assertEqual(run_batch.call_count, 1)
+            self.assertTrue(pause_path.exists())
+
     def test_signal_stops_worker_loop(self):
         worker = worker_module.ProgrammeAnalyzerWorker(self.config())
         worker.stop(signal.SIGTERM)
