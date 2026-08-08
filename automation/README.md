@@ -193,8 +193,37 @@ docker run --rm \
 Replace `CRAWLER_FACTORY_IMAGE` with the exact deployed image name. The
 temporary containers are removed after each command, while the credentials
 remain in the host directory. Never print, commit, or repeatedly restore an
-older copy of `auth.json`. If authentication must be replaced, stop the factory
-before reauthenticating so it cannot claim sources during the transition.
+older copy of `auth.json`. For planned credential replacement, stop the factory
+before reauthenticating. After an auth-triggered pause, leave the supervisor
+running: it cannot claim sources and will verify the replacement automatically.
+
+An explicit Codex authentication failure now stops further source claims. The
+current attempt is recorded as abandoned and immediately retryable rather than
+waiting seven days. Valid sources completed earlier in the batch are still
+published. The persistent pause marker is
+`/var/lib/crawler-factory/codex-auth-required.json`; while it exists the
+supervisor may reconcile an already-open PR but will not start another Codex
+batch.
+
+Reauthenticate the mounted host directory with the device-login command above.
+The paused supervisor detects the changed `auth.json`, performs one real Codex
+smoke request, and resumes only after it succeeds. Do not delete the marker to
+bypass the check. `codex_auth_required`, `codex_auth_pause_active`, and
+`codex_auth_restored` are the structured incident lifecycle events.
+
+If `TELEGRAM_ALERT_BOT_TOKEN` and `TELEGRAM_ALERT_CHAT_ID` are configured, the
+factory sends one direct Telegram notification when it creates the pause and
+one after authentication is verified and processing resumes. Notification
+delivery is best-effort and cannot bypass or delay the persistent pause. See
+`deployment/alerting/README.md` for setup and a safe test command.
+
+Inside the paused factory container, inspect or force the guarded smoke check
+after device login with:
+
+```bash
+python -m automation.codex_auth status
+python -m automation.codex_auth resume
+```
 
 Inspect the app logs after authentication. Startup should report continuous
 batching and the idle interval. If eligible sources exist, the first batch

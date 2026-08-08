@@ -77,6 +77,12 @@ class BaseCrawler:
         if self.config.dedupe_subset:
             df.drop_duplicates(subset=self.config.dedupe_subset, inplace=True)
 
+        # DataFrame.to_dict() preserves missing values in typed columns as
+        # float NaN / pandas NaT.  Database drivers then try to insert those
+        # values as floating-point numbers instead of SQL NULL, which breaks
+        # date and time columns.  Convert the frame to object dtype first so
+        # None survives the conversion to records.
+        df = df.astype(object).where(pd.notna(df), None)
         return df.to_dict(orient='records')
 
     def run(self):

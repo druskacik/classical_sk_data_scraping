@@ -725,6 +725,40 @@ class FactoryServiceTests(unittest.TestCase):
 
         wait.assert_called_once_with(900)
 
+    def test_auth_required_batch_persists_pause_and_starts_no_second_batch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            supervisor = service.FactoryService(self.config(Path(temporary)))
+
+            def conclusive_check():
+                supervisor.update_check_conclusive = True
+                supervisor.deployment_pending = False
+                return False
+
+            def stop_after_wait(_seconds):
+                supervisor.stop_event.set()
+
+            with (
+                patch.object(service.signal, "signal"),
+                patch.object(service, "prepare_git_authentication"),
+                patch.object(supervisor, "check_for_update", side_effect=conclusive_check),
+                patch.object(
+                    supervisor,
+                    "run_factory",
+                    return_value=service.BatchOutcome(
+                        1,
+                        1,
+                        "auth_required",
+                        auth_reason_code="refresh_token_revoked",
+                        auth_context={"source_id": 12},
+                    ),
+                ) as run_factory,
+                patch.object(supervisor, "wait", side_effect=stop_after_wait),
+            ):
+                supervisor.run()
+
+            self.assertEqual(run_factory.call_count, 1)
+            self.assertTrue(supervisor.auth_pause.path.exists())
+
     def test_full_continuous_batch_with_pull_request_waits_before_next_batch(self):
         with tempfile.TemporaryDirectory() as temporary:
             supervisor = service.FactoryService(self.config(Path(temporary)))

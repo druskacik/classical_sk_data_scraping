@@ -22,6 +22,7 @@ from typing import Callable
 from dotenv import load_dotenv
 from observability import configure_logging
 
+from automation.codex_auth import codex_auth_reason
 from automation.crawler_registry import CrawlerRegistry
 from build_crawlers_with_codex import MODEL, country_code_for_url, crawler_folder_name
 
@@ -86,6 +87,8 @@ def write_supervisor_result(
     status: str,
     pull_request_url: str | None = None,
     base_commit_sha: str | None = None,
+    auth_reason_code: str | None = None,
+    auth_context: dict | None = None,
 ) -> None:
     if path is None:
         return
@@ -101,6 +104,8 @@ def write_supervisor_result(
         "status": status,
         "pull_request_url": pull_request_url,
         "base_commit_sha": base_commit_sha,
+        "auth_reason_code": auth_reason_code,
+        "auth_context": auth_context,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(f"{path.suffix}.tmp")
@@ -499,6 +504,10 @@ def read_builder_report(builder_report: Path, item_summary_path: Path, result: d
             return
         latest = builder_data[-1]
         result["final_response"] = latest.get("final_response")
+        result["builder_status"] = latest.get("status")
+        result["auth_reason_code"] = latest.get("auth_reason_code")
+        if latest.get("error"):
+            result["builder_error"] = str(latest["error"])
         summaries = latest.get("item_summaries") or []
         item_summary_path.write_text(
             json.dumps(summaries, ensure_ascii=False, indent=2) + "\n",
@@ -561,6 +570,9 @@ def attempt_source(
         "scope_report_path": str(scope_report),
         "diagnostic_path": None,
         "builder_item_summary_path": None,
+        "builder_status": None,
+        "builder_error": None,
+        "auth_reason_code": None,
     }
     logger.info(
         "Starting crawler source attempt",
@@ -604,16 +616,17 @@ def attempt_source(
                     part = part.decode(errors="replace")
                 if part:
                     output_parts.append(part)
+            builder_output = "".join(output_parts)
             (run_dir / f"{source['id']}-{slug}-builder.log").write_text(
-                "".join(output_parts),
-                encoding="utf-8",
+                builder_output, encoding="utf-8"
             )
             unit = "minute" if timeout_minutes == 1 else "minutes"
             result["generation_warning"] = f"builder exceeded {timeout_minutes} {unit}"
             builder_exit_code = None
         else:
+            builder_output = generation.stdout + generation.stderr
             (run_dir / f"{source['id']}-{slug}-builder.log").write_text(
-                generation.stdout + generation.stderr,
+                builder_output,
                 encoding="utf-8",
             )
             if generation.returncode != 0:
@@ -622,6 +635,16 @@ def attempt_source(
                 )
             builder_exit_code = generation.returncode
         read_builder_report(builder_report, builder_items, result)
+        auth_reason = (
+            result.get("auth_reason_code")
+            or codex_auth_reason(result.get("builder_error"))
+            or codex_auth_reason(builder_output)
+        )
+        if result.get("builder_status") == "auth_required" or auth_reason:
+            result["status"] = "auth_required"
+            result["auth_reason_code"] = auth_reason or "login_required"
+            result["error"] = "Codex authentication is required"
+            return result
         logger.info(
             "Crawler builder completed",
             extra={
@@ -934,6 +957,8 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
     base_commit_sha: str | None = None
     run_created = False
     supervisor_result_written = False
+    auth_reason_code: str | None = None
+    auth_context: dict | None = None
     try:
         if os.getenv("GH_TOKEN"):
             run_command(["gh", "auth", "setup-git"])
@@ -1055,6 +1080,25 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
             )
             result["resolved_url"] = resolved_url
             results.append(result)
+            if result["status"] == "auth_required":
+                auth_reason_code = result.get("auth_reason_code") or "login_required"
+                auth_context = {"source_id": source["id"], "run_id": run_id}
+                registry.abandon_attempt(
+                    source["id"],
+                    attempt_id,
+                    error=f"Codex authentication required: {auth_reason_code}",
+                )
+                reset_failed_attempt(workspace)
+                logger.critical(
+                    "Codex authentication failure stopped crawler generation",
+                    extra={
+                        "event": "codex_auth_detected",
+                        "component": "crawler-factory",
+                        "reason_code": auth_reason_code,
+                        **auth_context,
+                    },
+                )
+                break
             registry.complete_attempt(
                 source["id"],
                 attempt_id,
@@ -1090,19 +1134,34 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
             },
         )
         if not successful_source_ids:
-            registry.finish_run(run_id, "no_changes")
+            registry.finish_run(run_id, "failed" if auth_reason_code else "no_changes")
             write_supervisor_result(
                 args.result_path,
                 run_id=run_id,
                 claimed_count=claimed_count,
                 results=results,
-                status="no_changes",
+                status="auth_required" if auth_reason_code else "no_changes",
+                auth_reason_code=auth_reason_code,
+                auth_context=auth_context,
             )
             supervisor_result_written = True
-            logger.info(
-                "Factory batch produced no changes",
-                extra={"event": "factory_batch_no_changes", "report_path": str(report_path)},
-            )
+            if auth_reason_code:
+                logger.critical(
+                    "Factory batch stopped because Codex authentication is required",
+                    extra={
+                        "event": "factory_batch_auth_required",
+                        "reason_code": auth_reason_code,
+                        "report_path": str(report_path),
+                    },
+                )
+            else:
+                logger.info(
+                    "Factory batch produced no changes",
+                    extra={
+                        "event": "factory_batch_no_changes",
+                        "report_path": str(report_path),
+                    },
+                )
             return
         if args.no_push:
             registry.finish_run(run_id, "failed")
@@ -1111,7 +1170,9 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
                 run_id=run_id,
                 claimed_count=claimed_count,
                 results=results,
-                status="no_push",
+                status="auth_required" if auth_reason_code else "no_push",
+                auth_reason_code=auth_reason_code,
+                auth_context=auth_context,
             )
             supervisor_result_written = True
             logger.info(
@@ -1164,12 +1225,16 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
             run_id=run_id,
             claimed_count=claimed_count,
             results=results,
-            status="pr_open",
+            status="auth_required" if auth_reason_code else "pr_open",
             pull_request_url=pr_url,
             base_commit_sha=base_commit_sha,
+            auth_reason_code=auth_reason_code,
+            auth_context=auth_context,
         )
         supervisor_result_written = True
     except Exception:
+        if auth_reason_code and successful_source_ids:
+            registry.transition_sources(successful_source_ids, "needs_attention")
         if run_created:
             registry.finish_run(run_id, "failed")
         if not supervisor_result_written:
@@ -1178,8 +1243,10 @@ def run_factory(args: argparse.Namespace, registry: CrawlerRegistry) -> None:
                 run_id=run_id,
                 claimed_count=claimed_count,
                 results=results,
-                status="failed",
+                status="auth_required" if auth_reason_code else "failed",
                 base_commit_sha=base_commit_sha,
+                auth_reason_code=auth_reason_code,
+                auth_context=auth_context,
             )
         raise
     finally:

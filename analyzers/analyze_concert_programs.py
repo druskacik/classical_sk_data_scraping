@@ -19,6 +19,10 @@ from dotenv import load_dotenv
 from openai_codex import ApprovalMode, AsyncCodex, CodexConfig, Sandbox
 
 from agent_utils.concert_catalog import normalize
+from automation.codex_auth import (
+    CodexAuthRequiredError,
+    raise_for_codex_auth,
+)
 from crawlers.cities import normalize_city_key
 from observability import configure_logging
 
@@ -424,6 +428,7 @@ async def validate_model(codex: AsyncCodex, model: str) -> None:
     try:
         available = {item.model for item in (await codex.models()).data}
     except Exception as sdk_error:
+        raise_for_codex_auth(sdk_error)
         cache_path = Path(os.getenv("CODEX_HOME", Path.home() / ".codex")) / "models_cache.json"
         try:
             catalogue = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -485,6 +490,7 @@ async def run_agent(
             f"Concert group programme analysis exceeded {timeout_seconds} seconds"
         )
     if result.error:
+        raise_for_codex_auth(str(result.error))
         raise RuntimeError(str(result.error))
     if not result.final_response:
         raise RuntimeError("Codex returned no final response")
@@ -1144,6 +1150,8 @@ def write_batch_result(
     if error is not None:
         payload["error_type"] = type(error).__name__
         payload["error_message"] = str(error)
+        if isinstance(error, CodexAuthRequiredError):
+            payload["auth_reason_code"] = error.reason_code
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(f"{path.suffix}.tmp")
     temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -1218,6 +1226,7 @@ async def analyze_concert_group(
         except (asyncio.CancelledError, CodexClientUnhealthyError):
             raise
         except Exception as error:
+            raise_for_codex_auth(error)
             logger.exception(
                 "Candidate concert programme group failed",
                 extra={
@@ -1356,7 +1365,7 @@ async def run_concert_groups(
         tasks = [asyncio.create_task(run_group(group)) for group in groups]
         try:
             results = await asyncio.gather(*tasks)
-        except CodexClientUnhealthyError:
+        except (CodexClientUnhealthyError, CodexAuthRequiredError):
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -1439,6 +1448,24 @@ def run(
             failure_count=failures,
         )
         return failures
+    except CodexAuthRequiredError as error:
+        logger.critical(
+            "Codex authentication failure stopped programme analysis",
+            extra={
+                "event": "codex_auth_detected",
+                "component": "programme-analyzer",
+                "reason_code": error.reason_code,
+            },
+        )
+        write_batch_result(
+            result_path,
+            status="auth_required",
+            selected_count=selected_count,
+            group_count=group_count,
+            failure_count=None,
+            error=error,
+        )
+        raise
     except Exception as error:
         write_batch_result(
             result_path,

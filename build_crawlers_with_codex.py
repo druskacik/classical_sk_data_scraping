@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 import pystache
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
+from automation.codex_auth import CodexAuthRequiredError, raise_for_codex_auth
+
 
 MODEL = "gpt-5.6-sol"
 PROMPT_PATH = Path("prompts/build_crawler.mustache")
@@ -207,6 +209,7 @@ def build_crawler(
     )
 
     if result.error:
+        raise_for_codex_auth(str(result.error))
         raise RuntimeError(f"Codex failed for {url}: {result.error}")
 
     return {
@@ -328,17 +331,24 @@ def main() -> None:
                     args.model,
                 )
             except Exception as exc:
+                auth_error = exc if isinstance(exc, CodexAuthRequiredError) else None
+                if auth_error is None:
+                    try:
+                        raise_for_codex_auth(exc)
+                    except CodexAuthRequiredError as detected:
+                        auth_error = detected
                 result = {
                     "url": url,
-                    "status": "generation_failed",
+                    "status": "auth_required" if auth_error else "generation_failed",
                     "crawler_directory": None,
                     "final_response": None,
                     "error": f"{type(exc).__name__}: {exc}",
+                    "auth_reason_code": auth_error.reason_code if auth_error else None,
                     "traceback": traceback.format_exc(),
                 }
                 results.append(result)
                 print(f"FAILED {url}: {result['error']}")
-                if not args.continue_on_error:
+                if auth_error or not args.continue_on_error:
                     break
             else:
                 results.append(result)
@@ -349,7 +359,7 @@ def main() -> None:
         args.results.parent.mkdir(parents=True, exist_ok=True)
         args.results.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
 
-    if any(result["status"] == "generation_failed" for result in results):
+    if any(result["status"] in {"generation_failed", "auth_required"} for result in results):
         raise SystemExit(1)
 
 

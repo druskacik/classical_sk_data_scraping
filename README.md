@@ -59,6 +59,28 @@ seed, mount one credential directory into multiple running services, print
 `auth.json`, or store it in the repository or logs. See
 `automation/README.md` for the factory-specific authentication procedure.
 
+If a Codex request reports revoked or missing authentication, programme
+analysis stops immediately without consuming concert attempts. The daily
+crawler and Gemini-classifier scheduler continues. The pause survives restarts
+at `/var/lib/classical-bot/codex-auth-required.json` and emits
+`codex_auth_pause_active` once per minute for alerting.
+
+Reauthenticate the same host directory with the temporary-container command
+above. The running service notices the changed `auth.json`, performs one real
+bounded Codex smoke request, removes the pause only after success, and emits
+`codex_auth_restored`. Do not delete the pause marker to bypass verification.
+Set `TELEGRAM_ALERT_BOT_TOKEN` and `TELEGRAM_ALERT_CHAT_ID` on the application
+to receive the initial pause and verified-recovery notifications directly in
+Telegram. Setup and testing are documented in `deployment/alerting/README.md`;
+no separate alerting service is required.
+
+Inside the running app container, inspect or force the guarded smoke check with:
+
+```bash
+python -m automation.codex_auth status
+python -m automation.codex_auth resume
+```
+
 The in-app programme analyzer defaults to batches of 100 concerts with
 concurrency 4. It immediately continues after a full batch and waits five
 minutes after draining the eligible queue. Fatal batches back off for fifteen

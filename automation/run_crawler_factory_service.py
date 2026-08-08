@@ -16,6 +16,9 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from observability import configure_logging
 
+from automation.codex_auth import CodexAuthPause
+from automation.notifications import Notification, send_notification
+
 from deployment.caprover_updater import (
     CapRoverUpdater,
     CapRoverUpdaterConfig,
@@ -168,6 +171,8 @@ class BatchOutcome:
     status: str | None
     pull_request_url: str | None = None
     base_commit_sha: str | None = None
+    auth_reason_code: str | None = None
+    auth_context: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -284,6 +289,10 @@ class FactoryService:
         self.deployment_pending = False
         self.update_check_conclusive = True
         self._last_pending_pr_observation: tuple[str, ...] | None = None
+        self.auth_pause = CodexAuthPause.for_service(
+            "classical-crawler-factory",
+            config.state_path.parent / "codex-auth-required.json",
+        )
 
     def stop(self, signum: int, _frame: object = None) -> None:
         log(f"Received signal {signum}; stopping")
@@ -343,12 +352,21 @@ class FactoryService:
                 status = None
                 pull_request_url = None
                 base_commit_sha = None
+                auth_reason_code = None
+                auth_context = None
+            else:
+                raw_reason = payload.get("auth_reason_code")
+                auth_reason_code = str(raw_reason) if raw_reason else None
+                raw_context = payload.get("auth_context")
+                auth_context = raw_context if isinstance(raw_context, dict) else None
             return BatchOutcome(
                 self.child.returncode,
                 claimed_count,
                 status,
                 pull_request_url,
                 base_commit_sha,
+                auth_reason_code,
+                auth_context,
             )
         finally:
             return_code = self.child.returncode
@@ -406,6 +424,41 @@ class FactoryService:
 
     def wait(self, seconds: int) -> None:
         self.stop_event.wait(seconds)
+
+    def wait_for_authentication(self) -> None:
+        state = self.auth_pause.load() or {}
+        logger.warning(
+            "Crawler factory is paused until Codex is reauthenticated",
+            extra={
+                "event": "codex_auth_pause_active",
+                "component": "crawler-factory",
+                "reason_code": state.get("reason_code", "unknown"),
+            },
+        )
+        if self.auth_pause.auth_file_changed():
+            resumed, failure = self.auth_pause.verify_and_resume(cwd=Path.cwd())
+            if resumed:
+                logger.info(
+                    "Codex authentication verified; crawler factory resumed",
+                    extra={"event": "codex_auth_restored", "component": "crawler-factory"},
+                )
+                send_notification(
+                    Notification(
+                        title="Codex authentication restored",
+                        message="Crawler factory authentication was verified and processing resumed.",
+                        severity="info",
+                    )
+                )
+                return
+            logger.warning(
+                "Codex authentication recovery check did not succeed",
+                extra={
+                    "event": "codex_auth_recovery_failed",
+                    "component": "crawler-factory",
+                    "reason_code": failure,
+                },
+            )
+        self.wait(60)
 
     def remember_pending_pull_request(
         self,
@@ -645,7 +698,17 @@ class FactoryService:
             )
         while not self.stop_event.is_set():
             if self.pending_pull_request_is_open():
-                self.wait(self.config.pr_poll_interval_seconds)
+                if self.auth_pause.is_paused():
+                    self.wait_for_authentication()
+                else:
+                    self.wait(self.config.pr_poll_interval_seconds)
+                continue
+            if self.auth_pause.is_paused():
+                monotonic_now = time.monotonic()
+                if monotonic_now >= next_update_check:
+                    self.check_for_update()
+                    next_update_check = monotonic_now + self.config.update_interval_seconds
+                self.wait_for_authentication()
                 continue
             now = datetime.now(self.config.timezone)
             should_run = self.config.mode == CONTINUOUS_MODE or batch_is_due(
@@ -659,6 +722,31 @@ class FactoryService:
                 outcome = self.run_factory(now)
                 if self.stop_event.is_set():
                     break
+                if outcome.status == "auth_required":
+                    created = self.auth_pause.pause(
+                        outcome.auth_reason_code or "login_required",
+                        outcome.auth_context or {"component": "crawler-factory"},
+                    )
+                    if created:
+                        logger.critical(
+                            "Crawler factory entered persistent Codex authentication pause",
+                            extra={
+                                "event": "codex_auth_required",
+                                "component": "crawler-factory",
+                                "reason_code": outcome.auth_reason_code or "login_required",
+                            },
+                        )
+                        send_notification(
+                            Notification(
+                                title="Codex authentication required",
+                                message=(
+                                    "Crawler factory stopped before claiming more sources. "
+                                    "Reauthenticate its Codex credential directory. "
+                                    f"Reason: {outcome.auth_reason_code or 'login_required'}."
+                                ),
+                                severity="critical",
+                            )
+                        )
                 if outcome.pull_request_url:
                     self.remember_pending_pull_request(
                         outcome.pull_request_url,
