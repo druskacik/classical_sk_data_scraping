@@ -42,7 +42,7 @@ ARG CAPROVER_GIT_COMMIT_SHA
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOME=/factory-home \
-    CODEX_HOME=/factory-codex-home \
+    CODEX_HOME=/codex-home \
     PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/bin/chromium \
     PLAYWRIGHT_MCP_HEADLESS=true \
     PLAYWRIGHT_MCP_NO_SANDBOX=true \
@@ -61,6 +61,6 @@ ENV PYTHONUNBUFFERED=1 \
     LOG_LEVEL=INFO \
     CAPROVER_GIT_COMMIT_SHA=${CAPROVER_GIT_COMMIT_SHA}
 
-VOLUME ["/var/lib/crawler-factory", "/factory-home", "/factory-codex-home"]
+VOLUME ["/var/lib/crawler-factory", "/factory-home", "/codex-home"]
 
 CMD ["python", "-m", "automation.run_crawler_factory_service"]
