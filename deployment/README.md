@@ -5,10 +5,18 @@ invokes a private Captain Webhook for newer commits, persists successful
 requests, and keeps failed checks retryable. The crawler factory and normal
 scraper runner apply their own scheduling guards around this shared mechanism.
 
-The normal scraper app checks `master` after its final scheduled analyzer has
-returned. Failed checks are retried every five minutes in that post-pipeline
-window. Once the check succeeds or finds no update, deployment checks remain
-disabled until the next daily pipeline finishes.
+After the daily crawlers and potential-event classifier have returned, the
+scheduler writes a persistent update-check request. The parent process checks
+`master`; failed checks remain retryable every five minutes. A conclusive
+no-update result consumes the request and disables checks until the next daily
+pipeline finishes.
+
+The continuous programme analyzer is part of the same `classical-bot` app and
+does not perform its own update checks. When a newer commit is found, the parent
+lets the current analyzer batch finish and prevents another batch from starting.
+It invokes the deployment webhook only after the analyzer is drained. If the
+batch does not finish within one hour, the existing supervised shutdown safely
+interrupts it before deployment.
 
 ## CapRover configuration
 
@@ -31,6 +39,26 @@ Optional settings:
 | --- | --- | --- |
 | `SCRAPER_REPOSITORY` | `https://github.com/druskacik/classical_bot.git` | Repository queried for `master` |
 | `SCRAPER_DEPLOY_STATE_PATH` | `/var/lib/classical-bot/deployment-state.json` | Persistent updater state |
+| `SCRAPER_UPDATE_REQUEST_PATH` | `/var/lib/classical-bot/update-check-request.json` | Daily scheduler-to-parent update signal |
+| `SCRAPER_UPDATE_RETRY_SECONDS` | `300` | Retry interval for failed checks and webhook requests |
 
 If the webhook or deployed commit SHA is unavailable, scraping continues and
 automatic deployment is disabled with a log message.
+
+## Continuous programme analyzer
+
+The default `classical-bot` Docker image supervises both the daily scraper
+scheduler and the continuous programme analyzer. Configure the production
+database and trusted Codex authentication on that app without placing
+credentials in the repository or image. Database migrations run once before
+the combined runtime starts.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CONCERT_PROGRAM_BATCH_SIZE` | `100` | Maximum concerts selected per child batch |
+| `CONCERT_PROGRAM_CONCURRENCY` | `4` | Concurrent Codex group turns |
+| `CONCERT_PROGRAM_IDLE_INTERVAL_SECONDS` | `300` | Wait after draining the queue |
+| `CONCERT_PROGRAM_FAILURE_BACKOFF_SECONDS` | `900` | Wait after a fatal batch |
+| `CONCERT_PROGRAM_STALL_TIMEOUT_SECONDS` | `2400` | Kill a child with no group progress |
+| `CONCERT_PROGRAM_BATCH_TIMEOUT_SECONDS` | `72000` | Hard child-batch deadline |
+| `CONCERT_PROGRAM_DEPLOY_DRAIN_TIMEOUT_SECONDS` | `3600` | Maximum wait for a batch boundary before deployment |
