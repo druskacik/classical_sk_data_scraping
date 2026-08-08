@@ -7,6 +7,7 @@ from observability import log_message
 def get_access_token():
     url = 'https://www.cultusruzinov.sk/_api/v1/access-tokens'
     r = requests.get(url)
+    r.raise_for_status()
     response = r.json()
     key = random.choice(list(response['apps'].keys()))
     return response['apps'][key]['instance']
@@ -22,6 +23,7 @@ def get_event_data(slug, access_token):
     url = f'https://www.cultusruzinov.sk/_api/wix-one-events-server/html/page-data/{slug}'
     log_message('Fetching event detail', event='crawler_url_fetch', url=url)
     r = requests.get(url, headers={'authorization': access_token})
+    r.raise_for_status()
     response = r.json()
     
     start_date = response['event']['scheduling']['config']['startDate']
@@ -64,7 +66,20 @@ class CultusRuzinovCrawler(BaseCrawler):
             try:
                 slugs = get_event_slugs(access_token)
                 log_message('Concert URLs discovered', event='crawler_urls_discovered', level='info', record_count=len(slugs))
-                return [get_event_data(slug, access_token) for slug in slugs]
+                concerts = []
+                for slug in slugs:
+                    try:
+                        concerts.append(get_event_data(slug, access_token))
+                    except Exception as error:
+                        log_message(
+                            'Event detail failed',
+                            event='crawler_item_failed',
+                            level='warning',
+                            slug=slug,
+                            error_type=type(error).__name__,
+                            error_message=str(error),
+                        )
+                return concerts
             except Exception as e:
                 log_message('Crawler attempt failed', event='crawler_attempt_failed', level='warning', error_type=type(e).__name__, error_message=str(e))
                 n_attempts += 1

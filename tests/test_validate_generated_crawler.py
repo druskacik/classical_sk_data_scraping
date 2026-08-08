@@ -115,6 +115,19 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(records[0]["country_code"], "CZ")
         crawler.upload.assert_not_called()
 
+    def test_prepare_records_converts_pandas_missing_values_to_none(self):
+        record = valid_record(
+            date=pd.NaT,
+            time_from=float("nan"),
+            description=pd.NA,
+        )
+
+        prepared = ExampleCrawler().prepare_records([record])
+
+        self.assertIsNone(prepared[0]["date"])
+        self.assertIsNone(prepared[0]["time_from"])
+        self.assertIsNone(prepared[0]["description"])
+
     def test_config_without_default_country_accepts_and_normalizes_record_countries(self):
         class CommonCrawler(BaseCrawler):
             config = CrawlerConfig(
